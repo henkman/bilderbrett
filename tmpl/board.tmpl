@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title></title>
+	<style>
+		.thread {
+			border-style: solid;
+		}
+	</style>
+</head>
+<body>
+	{{range .Threads}}
+	<div class="thread" id="thread_{{.Post.Id}}">
+		<div class="header">
+			<div class="posted">
+				{{.Post.Posted}}
+			</div>
+			<div class="reply">
+				<a href="/{{$.Name}}/thread/{{.Post.Id}}">Reply</a>
+			</div>
+		</div>
+		{{if .Post.Media}}
+		<div class="media">
+		{{range .Post.Media}}
+			<div class="image" id="media_{{.Id}}">
+				<a href="/media/{{.Id}}{{.Extension}}">
+					<img src="/thumb/{{.Id}}{{.Extension}}"></img>
+					{{.Filename}}
+				</a>
+			</div>
+		{{end}}
+		</div>
+		{{end}}
+		<div class="text">
+			{{.Post.Text}}
+		</div>
+	</div>
+	{{end}}
+	<div>			
+		{{range .Pages}}
+		<a href="/{{$.Name}}/{{.}}">{{.}}</a>
+		{{end}}
+	</div>
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title></title>
+	<style>
+		.thread {
+			border-style: solid;
+		}
+	</style>
+</head>
+<body>
+	{{with .Thread}}
+	<div class="thread" id="thread_{{.Id}}">
+		<div class="post" id="post{{.Id}}">
+			<div class="header">
+				<div class="posted">
+					{{.Posted}}
+				</div>
+			</div>
+			{{if .Media}}
+			<div class="media">
+			{{range .Media}}
+				<div class="image" id="media_{{.Id}}">
+					<a href="/media/{{.Id}}{{.Extension}}">
+						<img src="/thumb/{{.Id}}{{.Extension}}"></img>
+						{{.Filename}}
+					</a>
+				</div>
+			{{end}}
+			</div>
+			{{end}}
+			<div class="text">
+				{{.Text}}
+			</div>
+		</div>
+		<div class="posts">
+			{{range .Posts}}
+			<div class="post" id="post{{.Id}}">
+				<div class="header">
+					<div class="posted">
+						{{.Posted}}
+					</div>
+				</div>
+				{{if .Media}}
+				<div class="media">
+				{{range .Media}}
+					<div class="image" id="media_{{.Id}}">
+						<a href="/media/{{.Id}}{{.Extension}}">
+							<img src="/thumb/{{.Id}}{{.Extension}}"></img>
+							{{.Filename}}
+						</a>
+					</div>
+				{{end}}
+				</div>
+				{{end}}
+				<div class="text">
+					{{.Text}}
+				</div>
+			</div>
+			{{end}}
+		</div>
+	</div>
+	{{end}}
+	<div>			
+		{{range .Pages}}
+		<a href="/{{$.Name}}/{{.}}">{{.}}</a>
+		{{end}}
+	</div>
+</body>
+</html>
