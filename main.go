@@ -4,8 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -52,6 +56,10 @@ func (t *Thread) LastPost() Post {
 	return t.Posts[l-1]
 }
 
+func (t *Thread) AddPost(p Post) {
+	t.Posts = append(t.Posts, p)
+}
+
 type Threads []Thread
 
 func (ts Threads) Len() int {
@@ -67,18 +75,20 @@ func (ts Threads) Less(i, j int) bool {
 }
 
 type Board struct {
-	Name           string
-	Threads        Threads
-	Pages          uint
-	ThreadsPerPage uint
-	Write          sync.Mutex
-	BoardTempl     string
-	ThreadTempl    string
+	Name            string
+	Threads         Threads
+	Pages           uint
+	ThreadsPerPage  uint
+	Write           sync.Mutex
+	BoardTmpl       string
+	ThreadTmpl      string
+	PostCounter     uint64
+	MediaCounter    uint64
+	MaxMediaPerPost uint
+	MaxPostLength   uint
 }
 
 func (b *Board) AddThread(thread Thread) {
-	b.Write.Lock()
-	fmt.Printf("%+v\n", b.Threads)
 	sort.Sort(b.Threads)
 	if len(b.Threads) < cap(b.Threads) {
 		b.Threads = append(b.Threads, thread)
@@ -88,7 +98,6 @@ func (b *Board) AddThread(thread Thread) {
 		}
 		b.Threads[0] = thread
 	}
-	b.Write.Unlock()
 }
 
 func (b *Board) GetThreadsOfPage(page uint) []Thread {
@@ -115,20 +124,20 @@ func (b *Board) AvailablePages() uint {
 	return max
 }
 
-func (b *Board) GetThreadById(id uint64) (Thread, error) {
-	for _, t := range b.Threads {
-		if t.Id == id {
-			return t, nil
+func (b *Board) GetThreadById(id uint64) (*Thread, error) {
+	for i, _ := range b.Threads {
+		if b.Threads[i].Id == id {
+			return &b.Threads[i], nil
 		}
 	}
-	return Thread{}, errors.New("thread not found")
+	return nil, errors.New("thread not found")
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 
 }
 
-func makeThreadHandler(board Board) httprouter.Handle {
+func makeThreadHandler(board *Board) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		id, err := strconv.ParseUint(ps.ByName("id"), 10, 64)
 		if err != nil {
@@ -146,19 +155,25 @@ func makeThreadHandler(board Board) httprouter.Handle {
 		for i = 0; i < lastpage; i++ {
 			pages[i] = i
 		}
-		tmpls.ExecuteTemplate(w, board.ThreadTempl, struct {
-			Name   string
-			Thread Thread
-			Pages  []uint
+		maxmedia := make([]uint, board.MaxMediaPerPost)
+		for i = 0; i < board.MaxMediaPerPost; i++ {
+			maxmedia[i] = i
+		}
+		tmpls.ExecuteTemplate(w, board.ThreadTmpl, struct {
+			Name     string
+			Thread   Thread
+			Pages    []uint
+			MaxMedia []uint
 		}{
 			board.Name,
-			thread,
+			*thread,
 			pages,
+			maxmedia,
 		})
 	}
 }
 
-func makeBoardHandler(board Board, page uint) httprouter.Handle {
+func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		threads := board.GetThreadsOfPage(page)
 		lastpage := board.AvailablePages()
@@ -167,75 +182,190 @@ func makeBoardHandler(board Board, page uint) httprouter.Handle {
 		for i = 0; i < lastpage; i++ {
 			pages[i] = i
 		}
-		tmpls.ExecuteTemplate(w, board.BoardTempl, struct {
-			Name    string
-			Threads []Thread
-			Pages   []uint
+		maxmedia := make([]uint, board.MaxMediaPerPost)
+		for i = 0; i < board.MaxMediaPerPost; i++ {
+			maxmedia[i] = i
+		}
+		tmpls.ExecuteTemplate(w, board.BoardTmpl, struct {
+			Name     string
+			Threads  []Thread
+			Pages    []uint
+			MaxMedia []uint
 		}{
 			board.Name,
 			threads,
 			pages,
+			maxmedia,
 		})
+	}
+}
+
+func makePostHandler(board *Board) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		readMedia := func() ([]Medium, error) {
+			err := r.ParseMultipartForm(1024 * 1024)
+			if err != nil {
+				fmt.Println(err)
+				return nil, err
+			}
+			m := r.MultipartForm
+			var i uint
+			files := make([]*multipart.FileHeader, 0, board.MaxMediaPerPost)
+			for i = 0; i < board.MaxMediaPerPost; i++ {
+				file := m.File[fmt.Sprint("file", i)]
+				if len(file) == 0 {
+					break
+				}
+				files = append(files, file[0])
+			}
+			media := make([]Medium, len(files))
+			for i, file := range files {
+				// TODO detect file type
+				// TODO in case of error delete all the written files
+				media[i] = Medium{
+					Id:        board.MediaCounter + uint64(i),
+					Type:      MediumType_Image,
+					Filename:  file.Filename,
+					Extension: filepath.Ext(file.Filename),
+				}
+				src, err := file.Open()
+				if err != nil {
+					return nil, err
+				}
+				defer src.Close()
+				dstName := fmt.Sprint("./media/", board.Name, media[i].Id, media[i].Extension)
+				dst, err := os.OpenFile(dstName, os.O_CREATE|os.O_WRONLY, 0600)
+				if err != nil {
+					return nil, err
+				}
+				defer dst.Close()
+				if _, err := io.Copy(dst, src); err != nil {
+					return nil, err
+				}
+			}
+			return media, nil
+		}
+		// TODO check IP for ban
+		text := r.FormValue("text")
+		if uint(len(text)) > board.MaxPostLength {
+			http.Error(w, "text too long", http.StatusBadRequest)
+			return
+		}
+		sthreadid := r.FormValue("thread")
+		newthread := len(sthreadid) == 0
+		if newthread {
+			media, err := readMedia()
+			if err != nil {
+				http.Error(w, "media upload failed", http.StatusBadRequest)
+				return
+			}
+			board.Write.Lock()
+			{
+				thread := Thread{
+					Post: Post{
+						Id:     board.PostCounter,
+						Posted: time.Now(),
+						Media:  media,
+						Text:   text,
+					},
+					Posts: []Post{},
+				}
+				board.PostCounter++
+				board.MediaCounter += uint64(len(media))
+				board.AddThread(thread)
+			}
+			board.Write.Unlock()
+			http.Redirect(w, r, "/"+board.Name+"/", http.StatusFound)
+			return
+		}
+		threadid, err := strconv.ParseUint(sthreadid, 10, 64)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		thread, err := board.GetThreadById(threadid)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		media, err := readMedia()
+		if err != nil {
+			http.Error(w, "media upload failed", http.StatusBadRequest)
+			return
+		}
+		board.Write.Lock()
+		{
+			post := Post{
+				Id:     board.PostCounter,
+				Posted: time.Now(),
+				Media:  media,
+				Text:   text,
+			}
+			board.PostCounter++
+			board.MediaCounter += uint64(len(media))
+			thread.AddPost(post)
+		}
+		board.Write.Unlock()
+		http.Redirect(w, r, fmt.Sprintf("/%s/thread/%d", board.Name, thread.Id), http.StatusFound)
 	}
 }
 
 func main() {
 	boards := []Board{
 		{
-			Name:           "b",
-			Pages:          2,
-			ThreadsPerPage: 10,
-			Threads:        make([]Thread, 0, 2*10),
-			BoardTempl:     "board.tmpl",
-			ThreadTempl:    "thread.tmpl",
+			Name:            "b",
+			Pages:           2,
+			ThreadsPerPage:  10,
+			Threads:         make([]Thread, 0, 2*10),
+			BoardTmpl:       "board.tmpl",
+			ThreadTmpl:      "thread.tmpl",
+			MaxMediaPerPost: 4,
+			MaxPostLength:   200,
 		},
 		{
-			Name:           "int",
-			Pages:          10,
-			ThreadsPerPage: 10,
-			Threads:        make([]Thread, 0, 10*10),
-			BoardTempl:     "board.tmpl",
-			ThreadTempl:    "thread.tmpl",
+			Name:            "int",
+			Pages:           10,
+			ThreadsPerPage:  10,
+			Threads:         make([]Thread, 0, 10*10),
+			BoardTmpl:       "board.tmpl",
+			ThreadTmpl:      "thread.tmpl",
+			MaxMediaPerPost: 4,
+			MaxPostLength:   200,
 		},
 	}
 	{
+		board := &boards[0]
+		board.Write.Lock()
 		for i := 0; i < 25; i++ {
-			boards[0].AddThread(Thread{
+			board.AddThread(Thread{
 				Post: Post{
 					Media: []Medium{
 						{
-							uint64(i),
+							board.MediaCounter,
 							MediumType_Image,
 							"blorb.png",
 							".png",
 						},
 						{
-							uint64(i*2 + 1),
+							board.MediaCounter + 1,
 							MediumType_Image,
 							"blorb.png",
 							".png",
 						},
 					},
-					Id:     uint64(i),
+					Id:     board.PostCounter,
 					Posted: time.Date(4000, 4, 5, 5, i, 42, 54, time.UTC),
 					Text:   fmt.Sprint("hello world ", i),
 				},
 			})
+			board.PostCounter++
+			board.MediaCounter += 2
 		}
+		board.Write.Unlock()
 	}
 
-	fmt.Printf("%#v\n", boards)
 	{
-		funcs := template.FuncMap{
-			"loop": func(n int) []int {
-				ints := make([]int, n)
-				for i := 0; i < n; i++ {
-					ints[i] = i
-				}
-				return ints
-			},
-		}
-		t, err := template.New("_").Funcs(funcs).ParseGlob("./tmpl/*.tmpl")
+		t, err := template.ParseGlob("./tmpl/*.tmpl")
 		if err != nil {
 			panic(err)
 		}
@@ -244,8 +374,10 @@ func main() {
 
 	router := httprouter.New()
 	router.GET("/", indexHandler)
-	for _, board := range boards {
+	for i, _ := range boards {
+		board := &boards[i]
 		router.GET("/"+board.Name+"/", makeBoardHandler(board, 0))
+		router.POST("/"+board.Name+"/", makePostHandler(board))
 		router.GET(fmt.Sprintf("/%s/thread/:id", board.Name), makeThreadHandler(board))
 		var i uint
 		for i = 0; i < board.Pages; i++ {

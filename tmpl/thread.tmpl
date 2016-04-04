@@ -9,6 +9,19 @@
 	</style>
 </head>
 <body>
+	{{$board := .Name}}
+	<div>
+		<form method="post" action="/{{$board}}/" enctype="multipart/form-data">
+			<input type="hidden" name="thread" value="{{.Thread.Id}}" />
+			<div class="fileupload">
+				{{range .MaxMedia}}
+				<input type="file" name="file{{.}}" /><br/>
+				{{end}}
+			</div>
+			<textarea name="text" rows="4" cols="40"></textarea><br/>
+			<input type="submit" value="upload" />
+		</form>
+	</div>
 	{{with .Thread}}
 	<div class="thread" id="thread_{{.Id}}">
 		<div class="post" id="post{{.Id}}">
@@ -21,8 +34,8 @@
 			<div class="media">
 			{{range .Media}}
 				<div class="image" id="media_{{.Id}}">
-					<a href="/media/{{.Id}}{{.Extension}}">
-						<img src="/thumb/{{.Id}}{{.Extension}}"></img>
+					<a href="/media/{{$board}}{{.Id}}{{.Extension}}">
+						<img src="/thumb/{{$board}}{{.Id}}{{.Extension}}"></img>
 						{{.Filename}}
 					</a>
 				</div>
@@ -33,6 +46,7 @@
 				{{.Text}}
 			</div>
 		</div>
+		<hr/>
 		<div class="posts">
 			{{range .Posts}}
 			<div class="post" id="post{{.Id}}">
@@ -45,8 +59,8 @@
 				<div class="media">
 				{{range .Media}}
 					<div class="image" id="media_{{.Id}}">
-						<a href="/media/{{.Id}}{{.Extension}}">
-							<img src="/thumb/{{.Id}}{{.Extension}}"></img>
+						<a href="/media/{{$board}}{{.Id}}{{.Extension}}">
+							<img src="/thumb/{{$board}}{{.Id}}{{.Extension}}"></img>
 							{{.Filename}}
 						</a>
 					</div>
@@ -63,7 +77,7 @@
 	{{end}}
 	<div>			
 		{{range .Pages}}
-		<a href="/{{$.Name}}/{{.}}">{{.}}</a>
+		<a href="/{{$board}}/{{.}}">{{.}}</a>
 		{{end}}
 	</div>
 </body>

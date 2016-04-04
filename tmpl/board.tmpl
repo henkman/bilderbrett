@@ -9,6 +9,18 @@
 	</style>
 </head>
 <body>
+	{{$board := .Name}}
+	<div>
+		<form method="post" action="/{{$board}}/" enctype="multipart/form-data">
+			<div class="fileupload">
+				{{range .MaxMedia}}
+				<input type="file" name="file{{.}}" /><br/>
+				{{end}}
+			</div>
+			<textarea name="text" rows="4" cols="40"></textarea><br/>
+			<input type="submit" value="upload" />
+		</form>
+	</div>
 	{{range .Threads}}
 	<div class="thread" id="thread_{{.Post.Id}}">
 		<div class="header">
@@ -16,15 +28,15 @@
 				{{.Post.Posted}}
 			</div>
 			<div class="reply">
-				<a href="/{{$.Name}}/thread/{{.Post.Id}}">Reply</a>
+				<a href="/{{$board}}/thread/{{.Post.Id}}">Reply</a>
 			</div>
 		</div>
 		{{if .Post.Media}}
 		<div class="media">
 		{{range .Post.Media}}
 			<div class="image" id="media_{{.Id}}">
-				<a href="/media/{{.Id}}{{.Extension}}">
-					<img src="/thumb/{{.Id}}{{.Extension}}"></img>
+				<a href="/media/{{$board}}{{.Id}}{{.Extension}}">
+					<img src="/thumb/{{$board}}{{.Id}}{{.Extension}}"></img>
 					{{.Filename}}
 				</a>
 			</div>
@@ -38,7 +50,7 @@
 	{{end}}
 	<div>			
 		{{range .Pages}}
-		<a href="/{{$.Name}}/{{.}}">{{.}}</a>
+		<a href="/{{$board}}/{{.}}">{{.}}</a>
 		{{end}}
 	</div>
 </body>
