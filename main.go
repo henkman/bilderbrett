@@ -4,6 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	_ "image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
 	"mime/multipart"
@@ -12,10 +16,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
+	_ "github.com/nfnt/resize"
 )
 
 var (
@@ -133,13 +139,13 @@ func (b *Board) GetThreadById(id uint64) (*Thread, error) {
 	return nil, errors.New("thread not found")
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+func indexHandler(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 
 }
 
 func makeThreadHandler(board *Board) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		id, err := strconv.ParseUint(ps.ByName("id"), 10, 64)
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		id, err := strconv.ParseUint(p.ByName("id"), 10, 64)
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -174,7 +180,7 @@ func makeThreadHandler(board *Board) httprouter.Handle {
 }
 
 func makeBoardHandler(board *Board, page uint) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		threads := board.GetThreadsOfPage(page)
 		lastpage := board.AvailablePages()
 		pages := make([]uint, lastpage)
@@ -201,7 +207,7 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 }
 
 func makePostHandler(board *Board) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		readMedia := func() ([]Medium, error) {
 			err := r.ParseMultipartForm(1024 * 1024)
 			if err != nil {
@@ -220,20 +226,32 @@ func makePostHandler(board *Board) httprouter.Handle {
 			}
 			media := make([]Medium, len(files))
 			for i, file := range files {
-				// TODO detect file type
 				// TODO in case of error delete all the written files
+				// TODO if image write a thumbnail
+				// TODO check if file is longer than limit
+				var typ MediumType
+				ext := strings.ToLower(filepath.Ext(file.Filename))
+				if ext == ".gif" ||
+					ext == ".jpg" ||
+					ext == ".jpeg" ||
+					ext == ".png" {
+					typ = MediumType_Image
+				} else {
+					return nil, errors.New("invalid extension for file " + file.Filename)
+				}
 				media[i] = Medium{
 					Id:        board.MediaCounter + uint64(i),
-					Type:      MediumType_Image,
+					Type:      typ,
 					Filename:  file.Filename,
-					Extension: filepath.Ext(file.Filename),
+					Extension: ext,
 				}
 				src, err := file.Open()
 				if err != nil {
 					return nil, err
 				}
 				defer src.Close()
-				dstName := fmt.Sprint("./media/", board.Name, media[i].Id, media[i].Extension)
+				dstName := fmt.Sprint("./media/", board.Name,
+					media[i].Id, media[i].Extension)
 				dst, err := os.OpenFile(dstName, os.O_CREATE|os.O_WRONLY, 0600)
 				if err != nil {
 					return nil, err
@@ -306,7 +324,9 @@ func makePostHandler(board *Board) httprouter.Handle {
 			thread.AddPost(post)
 		}
 		board.Write.Unlock()
-		http.Redirect(w, r, fmt.Sprintf("/%s/thread/%d", board.Name, thread.Id), http.StatusFound)
+		http.Redirect(w, r,
+			fmt.Sprintf("/%s/thread/%d", board.Name, thread.Id),
+			http.StatusFound)
 	}
 }
 
@@ -378,10 +398,12 @@ func main() {
 		board := &boards[i]
 		router.GET("/"+board.Name+"/", makeBoardHandler(board, 0))
 		router.POST("/"+board.Name+"/", makePostHandler(board))
-		router.GET(fmt.Sprintf("/%s/thread/:id", board.Name), makeThreadHandler(board))
+		router.GET(fmt.Sprintf("/%s/thread/:id", board.Name),
+			makeThreadHandler(board))
 		var i uint
 		for i = 0; i < board.Pages; i++ {
-			router.GET(fmt.Sprintf("/%s/%d", board.Name, i), makeBoardHandler(board, i))
+			router.GET(fmt.Sprintf("/%s/%d", board.Name, i),
+				makeBoardHandler(board, i))
 		}
 	}
 	router.ServeFiles("/media/*filepath", http.Dir("./media/"))
