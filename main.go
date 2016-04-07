@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	_ "image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
+	"image"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"mime/multipart"
@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/julienschmidt/httprouter"
-	_ "github.com/nfnt/resize"
+	"github.com/nfnt/resize"
 )
 
 var (
@@ -80,18 +80,25 @@ func (ts Threads) Less(i, j int) bool {
 	return ts[i].LastPost().Posted.After(ts[j].LastPost().Posted)
 }
 
-type Board struct {
+type BoardConfiguration struct {
 	Name            string
-	Threads         Threads
 	Pages           uint
 	ThreadsPerPage  uint
-	Write           sync.Mutex
 	BoardTmpl       string
 	ThreadTmpl      string
-	PostCounter     uint64
-	MediaCounter    uint64
 	MaxMediaPerPost uint
 	MaxPostLength   uint
+	MaxThumbWidth   uint
+	MaxThumbHeight  uint
+}
+
+type Board struct {
+	BoardConfiguration
+
+	Threads      Threads
+	Write        sync.Mutex
+	PostCounter  uint64
+	MediaCounter uint64
 }
 
 func (b *Board) AddThread(thread Thread) {
@@ -206,63 +213,108 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 	}
 }
 
-func makePostHandler(board *Board) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		readMedia := func() ([]Medium, error) {
-			err := r.ParseMultipartForm(1024 * 1024)
-			if err != nil {
-				fmt.Println(err)
-				return nil, err
-			}
-			m := r.MultipartForm
-			var i uint
-			files := make([]*multipart.FileHeader, 0, board.MaxMediaPerPost)
-			for i = 0; i < board.MaxMediaPerPost; i++ {
-				file := m.File[fmt.Sprint("file", i)]
-				if len(file) == 0 {
-					break
-				}
-				files = append(files, file[0])
-			}
-			media := make([]Medium, len(files))
-			for i, file := range files {
-				// TODO in case of error delete all the written files
-				// TODO if image write a thumbnail
-				// TODO check if file is longer than limit
-				var typ MediumType
-				ext := strings.ToLower(filepath.Ext(file.Filename))
-				if ext == ".gif" ||
-					ext == ".jpg" ||
-					ext == ".jpeg" ||
-					ext == ".png" {
-					typ = MediumType_Image
-				} else {
-					return nil, errors.New("invalid extension for file " + file.Filename)
-				}
-				media[i] = Medium{
-					Id:        board.MediaCounter + uint64(i),
-					Type:      typ,
-					Filename:  file.Filename,
-					Extension: ext,
-				}
+func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
+	err := r.ParseMultipartForm(1024 * 1024)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	m := r.MultipartForm
+	var i uint
+	files := make([]*multipart.FileHeader, 0, board.MaxMediaPerPost)
+	for i = 0; i < board.MaxMediaPerPost; i++ {
+		file := m.File[fmt.Sprint("file", i)]
+		if len(file) == 0 {
+			break
+		}
+		files = append(files, file[0])
+	}
+	media := make([]Medium, len(files))
+	for i, file := range files {
+		// TODO in case of error delete all the written files
+		// TODO check if file is longer than limit
+		var typ MediumType
+		ext := strings.ToLower(filepath.Ext(file.Filename))
+		if ext == ".gif" ||
+			ext == ".jpg" ||
+			ext == ".jpeg" ||
+			ext == ".png" {
+			typ = MediumType_Image
+		} else {
+			return nil, errors.New("invalid extension for file " + file.Filename)
+		}
+		medium := Medium{
+			Id:        board.MediaCounter + uint64(i),
+			Type:      typ,
+			Filename:  file.Filename,
+			Extension: ext,
+		}
+		switch typ {
+		case MediumType_Image:
+			{
 				src, err := file.Open()
 				if err != nil {
 					return nil, err
 				}
 				defer src.Close()
-				dstName := fmt.Sprint("./media/", board.Name,
-					media[i].Id, media[i].Extension)
-				dst, err := os.OpenFile(dstName, os.O_CREATE|os.O_WRONLY, 0600)
-				if err != nil {
-					return nil, err
+				{
+					img, format, err := image.Decode(src)
+					if err != nil {
+						return nil, err
+					}
+					thmb := resize.Thumbnail(
+						board.MaxThumbWidth, board.MaxThumbWidth,
+						img, resize.Bicubic)
+					dstName := fmt.Sprint("./thumb/", board.Name,
+						medium.Id, medium.Extension)
+					dst, err := os.OpenFile(dstName, os.O_CREATE|os.O_WRONLY,
+						0600)
+					if err != nil {
+						return nil, err
+					}
+					switch format {
+					case "png":
+						if err := png.Encode(dst, thmb); err != nil {
+							dst.Close()
+							return nil, err
+						}
+					case "jpeg":
+						if err := jpeg.Encode(dst, thmb, nil); err != nil {
+							dst.Close()
+							return nil, err
+						}
+					case "gif":
+						if err := gif.Encode(dst, thmb, nil); err != nil {
+							dst.Close()
+							return nil, err
+						}
+					}
+					dst.Close()
 				}
-				defer dst.Close()
-				if _, err := io.Copy(dst, src); err != nil {
-					return nil, err
+				src.Seek(0, 0)
+				{
+					dstName := fmt.Sprint("./media/", board.Name,
+						medium.Id, medium.Extension)
+					dst, err := os.OpenFile(dstName, os.O_CREATE|os.O_WRONLY,
+						0600)
+					if err != nil {
+						return nil, err
+					}
+					if _, err := io.Copy(dst, src); err != nil {
+						dst.Close()
+						return nil, err
+					}
+					dst.Close()
 				}
+				media[i] = medium
 			}
-			return media, nil
 		}
+	}
+	return media, nil
+}
+
+func makePostHandler(board *Board) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		// TODO check IP for ban
 		text := r.FormValue("text")
 		if uint(len(text)) > board.MaxPostLength {
@@ -272,7 +324,7 @@ func makePostHandler(board *Board) httprouter.Handle {
 		sthreadid := r.FormValue("thread")
 		newthread := len(sthreadid) == 0
 		if newthread {
-			media, err := readMedia()
+			media, err := processMediaOfRequest(board, r)
 			if err != nil {
 				http.Error(w, "media upload failed", http.StatusBadRequest)
 				return
@@ -306,7 +358,7 @@ func makePostHandler(board *Board) httprouter.Handle {
 			http.NotFound(w, r)
 			return
 		}
-		media, err := readMedia()
+		media, err := processMediaOfRequest(board, r)
 		if err != nil {
 			http.Error(w, "media upload failed", http.StatusBadRequest)
 			return
@@ -331,31 +383,44 @@ func makePostHandler(board *Board) httprouter.Handle {
 }
 
 func main() {
-	boards := []Board{
+	// TODO load the board configuration from json
+	boardconfigs := []BoardConfiguration{
 		{
 			Name:            "b",
-			Pages:           2,
-			ThreadsPerPage:  10,
-			Threads:         make([]Thread, 0, 2*10),
 			BoardTmpl:       "board.tmpl",
 			ThreadTmpl:      "thread.tmpl",
+			Pages:           2,
+			ThreadsPerPage:  10,
 			MaxMediaPerPost: 4,
 			MaxPostLength:   200,
+			MaxThumbWidth:   200,
+			MaxThumbHeight:  200,
 		},
 		{
 			Name:            "int",
-			Pages:           10,
-			ThreadsPerPage:  10,
-			Threads:         make([]Thread, 0, 10*10),
 			BoardTmpl:       "board.tmpl",
 			ThreadTmpl:      "thread.tmpl",
+			Pages:           2,
+			ThreadsPerPage:  10,
 			MaxMediaPerPost: 4,
 			MaxPostLength:   200,
+			MaxThumbWidth:   200,
+			MaxThumbHeight:  200,
 		},
 	}
-	{
+
+	boards := make([]Board, len(boardconfigs))
+	for i, _ := range boards {
+		boards[i].BoardConfiguration = boardconfigs[i]
+		boards[i].Threads = make([]Thread, 0,
+			boards[i].Pages*boards[i].ThreadsPerPage)
+	}
+
+	// TODO write routine that dumps a board in an interval to json
+	// TODO load the json dumped data at start
+
+	{ // test data, replace with code that loads from json
 		board := &boards[0]
-		board.Write.Lock()
 		for i := 0; i < 25; i++ {
 			board.AddThread(Thread{
 				Post: Post{
@@ -374,14 +439,13 @@ func main() {
 						},
 					},
 					Id:     board.PostCounter,
-					Posted: time.Date(4000, 4, 5, 5, i, 42, 54, time.UTC),
+					Posted: time.Date(2000, 4, 5, 5, i, 42, 54, time.UTC),
 					Text:   fmt.Sprint("hello world ", i),
 				},
 			})
 			board.PostCounter++
 			board.MediaCounter += 2
 		}
-		board.Write.Unlock()
 	}
 
 	{
@@ -406,6 +470,7 @@ func main() {
 				makeBoardHandler(board, i))
 		}
 	}
+	router.ServeFiles("/thumb/*filepath", http.Dir("./thumb/"))
 	router.ServeFiles("/media/*filepath", http.Dir("./media/"))
 	log.Fatal(http.ListenAndServe(":8080", router))
 }

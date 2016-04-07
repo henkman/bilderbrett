@@ -26,6 +26,9 @@
 	<div class="thread" id="thread_{{.Id}}">
 		<div class="post" id="post{{.Id}}">
 			<div class="header">
+				<div class="postid">
+					{{.Id}}
+				</div>
 				<div class="posted">
 					{{.Posted}}
 				</div>
@@ -51,6 +54,9 @@
 			{{range .Posts}}
 			<div class="post" id="post{{.Id}}">
 				<div class="header">
+					<div class="postid">
+						{{.Id}}
+					</div>
 					<div class="posted">
 						{{.Posted}}
 					</div>

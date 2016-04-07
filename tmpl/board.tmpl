@@ -24,6 +24,9 @@
 	{{range .Threads}}
 	<div class="thread" id="thread_{{.Post.Id}}">
 		<div class="header">
+			<div class="postid">
+				{{.Post.Id}}
+			</div>
 			<div class="posted">
 				{{.Post.Posted}}
 			</div>
