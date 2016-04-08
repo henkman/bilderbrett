@@ -33,6 +33,9 @@ type MediumType uint8
 
 const (
 	MediumType_Image MediumType = iota
+	MediumType_Webm
+	MediumType_Archive
+	MediumType_Text
 )
 
 type Medium struct {
@@ -90,6 +93,7 @@ type BoardConfiguration struct {
 	MaxPostLength   uint
 	MaxThumbWidth   uint
 	MaxThumbHeight  uint
+	MaxFileSize     uint64
 }
 
 type Board struct {
@@ -216,169 +220,229 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 	err := r.ParseMultipartForm(1024 * 1024)
 	if err != nil {
-		fmt.Println(err)
-		return nil, err
+		return nil, errors.New("internal error ParseMultipartForm()")
 	}
-	m := r.MultipartForm
-	var i uint
 	files := make([]*multipart.FileHeader, 0, board.MaxMediaPerPost)
-	for i = 0; i < board.MaxMediaPerPost; i++ {
-		file := m.File[fmt.Sprint("file", i)]
-		if len(file) == 0 {
-			break
-		}
-		files = append(files, file[0])
-	}
-	media := make([]Medium, len(files))
-	for i, file := range files {
-		// TODO in case of error delete all the written files
-		// TODO check if file is longer than limit
-		var typ MediumType
-		ext := strings.ToLower(filepath.Ext(file.Filename))
-		if ext == ".gif" ||
-			ext == ".jpg" ||
-			ext == ".jpeg" ||
-			ext == ".png" {
-			typ = MediumType_Image
-		} else {
-			return nil, errors.New("invalid extension for file " + file.Filename)
-		}
-		medium := Medium{
-			Id:        board.MediaCounter + uint64(i),
-			Type:      typ,
-			Filename:  file.Filename,
-			Extension: ext,
-		}
-		switch typ {
-		case MediumType_Image:
-			{
-				src, err := file.Open()
-				if err != nil {
-					return nil, err
-				}
-				defer src.Close()
-				{
-					img, format, err := image.Decode(src)
-					if err != nil {
-						return nil, err
-					}
-					thmb := resize.Thumbnail(
-						board.MaxThumbWidth, board.MaxThumbWidth,
-						img, resize.Bicubic)
-					dstName := fmt.Sprint("./thumb/", board.Name,
-						medium.Id, medium.Extension)
-					dst, err := os.OpenFile(dstName, os.O_CREATE|os.O_WRONLY,
-						0600)
-					if err != nil {
-						return nil, err
-					}
-					switch format {
-					case "png":
-						if err := png.Encode(dst, thmb); err != nil {
-							dst.Close()
-							return nil, err
-						}
-					case "jpeg":
-						if err := jpeg.Encode(dst, thmb, nil); err != nil {
-							dst.Close()
-							return nil, err
-						}
-					case "gif":
-						if err := gif.Encode(dst, thmb, nil); err != nil {
-							dst.Close()
-							return nil, err
-						}
-					}
-					dst.Close()
-				}
-				src.Seek(0, 0)
-				{
-					dstName := fmt.Sprint("./media/", board.Name,
-						medium.Id, medium.Extension)
-					dst, err := os.OpenFile(dstName, os.O_CREATE|os.O_WRONLY,
-						0600)
-					if err != nil {
-						return nil, err
-					}
-					if _, err := io.Copy(dst, src); err != nil {
-						dst.Close()
-						return nil, err
-					}
-					dst.Close()
-				}
-				media[i] = medium
+	{
+		var i uint
+		for i = 0; i < board.MaxMediaPerPost; i++ {
+			file := r.MultipartForm.File[fmt.Sprint("file", i)]
+			if len(file) != 0 {
+				files = append(files, file[0])
 			}
+		}
+	}
+	media := make([]Medium, 0, len(files))
+	for i, file := range files {
+		var medium Medium
+		{
+			var typ MediumType
+			ext := strings.ToLower(filepath.Ext(file.Filename))
+			if ext == ".gif" ||
+				ext == ".jpg" ||
+				ext == ".jpeg" ||
+				ext == ".png" {
+				typ = MediumType_Image
+			} else {
+				return media, errors.New("invalid extension for file " +
+					file.Filename)
+			}
+			medium = Medium{
+				Id:        board.MediaCounter + uint64(i),
+				Type:      typ,
+				Filename:  file.Filename,
+				Extension: ext,
+			}
+		}
+		{
+			src, err := file.Open()
+			if err != nil {
+				return media, errors.New("file.Open()")
+			}
+			defer src.Close()
+			size, err := src.Seek(0, os.SEEK_END)
+			if err != nil {
+				return media, errors.New("src.Seek(END)")
+			}
+			if uint64(size) > board.MaxFileSize {
+				return media, errors.New("file " + file.Filename + " too big")
+			}
+			src.Seek(0, os.SEEK_SET)
+
+			switch medium.Type {
+			case MediumType_Image:
+				{
+					{
+						img, format, err := image.Decode(src)
+						if err != nil {
+							return media, errors.New("image.Decode()")
+						}
+						thmb := resize.Thumbnail(
+							board.MaxThumbWidth, board.MaxThumbWidth,
+							img, resize.Bicubic)
+						name := fmt.Sprint("./thumb/", board.Name,
+							medium.Id, medium.Extension)
+						dst, err := os.OpenFile(name,
+							os.O_CREATE|os.O_WRONLY, 0600)
+						if err != nil {
+							return media, errors.New("os.OpenFile(thumb)")
+						}
+						switch format {
+						case "png":
+							if err := png.Encode(dst, thmb); err != nil {
+								dst.Close()
+								return media, errors.New("png.Encode()")
+							}
+						case "jpeg":
+							if err := jpeg.Encode(dst, thmb, nil); err != nil {
+								dst.Close()
+								return media, errors.New("jpeg.Encode()")
+							}
+						case "gif":
+							if err := gif.Encode(dst, thmb, nil); err != nil {
+								dst.Close()
+								return media, errors.New("gif.Encode()")
+							}
+						}
+						dst.Close()
+					}
+					src.Seek(0, os.SEEK_SET)
+					{
+						name := fmt.Sprint("./media/", board.Name,
+							medium.Id, medium.Extension)
+						dst, err := os.OpenFile(name,
+							os.O_CREATE|os.O_WRONLY, 0600)
+						if err != nil {
+							return media, errors.New("os.OpenFile(original)")
+						}
+						if _, err := io.Copy(dst, src); err != nil {
+							dst.Close()
+							return media, errors.New("io.Copy()")
+						}
+						dst.Close()
+					}
+				}
+			case MediumType_Webm:
+				{
+				}
+			case MediumType_Archive:
+				{
+				}
+			case MediumType_Text:
+				{
+				}
+			}
+			media = append(media, medium)
 		}
 	}
 	return media, nil
 }
 
-func makePostHandler(board *Board) httprouter.Handle {
+func deleteMediumFiles(b *Board, m Medium) {
+	o := fmt.Sprint("./media/", b.Name, m.Id, m.Extension)
+	if _, err := os.Stat(o); err == nil {
+		os.Remove(o)
+	}
+	switch m.Type {
+	case MediumType_Image:
+		{
+			t := fmt.Sprint("./thumb/", b.Name, m.Id, m.Extension)
+			if _, err := os.Stat(t); err == nil {
+				os.Remove(t)
+			}
+		}
+	case MediumType_Webm:
+		{
+		}
+	case MediumType_Archive:
+		{
+		}
+	case MediumType_Text:
+		{
+		}
+	}
+}
+
+func makePostHandler(b *Board) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		// TODO add captcha (solve captcha once then add to session for a time)
 		// TODO check IP for ban
+		// TODO rate limit posting
 		text := r.FormValue("text")
-		if uint(len(text)) > board.MaxPostLength {
+		if uint(len(text)) > b.MaxPostLength {
 			http.Error(w, "text too long", http.StatusBadRequest)
 			return
 		}
 		sthreadid := r.FormValue("thread")
 		newthread := len(sthreadid) == 0
 		if newthread {
-			media, err := processMediaOfRequest(board, r)
-			if err != nil {
-				http.Error(w, "media upload failed", http.StatusBadRequest)
-				return
-			}
-			board.Write.Lock()
+			b.Write.Lock()
 			{
+				// TODO find a way to process media without write lock
+				media, err := processMediaOfRequest(b, r)
+				if err != nil {
+					for _, m := range media {
+						deleteMediumFiles(b, m)
+					}
+					b.Write.Unlock()
+					http.Error(w, "media upload failed: "+err.Error(),
+						http.StatusBadRequest)
+					return
+				}
 				thread := Thread{
 					Post: Post{
-						Id:     board.PostCounter,
+						Id:     b.PostCounter,
 						Posted: time.Now(),
 						Media:  media,
 						Text:   text,
 					},
 					Posts: []Post{},
 				}
-				board.PostCounter++
-				board.MediaCounter += uint64(len(media))
-				board.AddThread(thread)
+				b.PostCounter++
+				b.MediaCounter += uint64(len(media))
+				b.AddThread(thread)
 			}
-			board.Write.Unlock()
-			http.Redirect(w, r, "/"+board.Name+"/", http.StatusFound)
-			return
-		}
-		threadid, err := strconv.ParseUint(sthreadid, 10, 64)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		thread, err := board.GetThreadById(threadid)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		media, err := processMediaOfRequest(board, r)
-		if err != nil {
-			http.Error(w, "media upload failed", http.StatusBadRequest)
-			return
-		}
-		board.Write.Lock()
-		{
-			post := Post{
-				Id:     board.PostCounter,
-				Posted: time.Now(),
-				Media:  media,
-				Text:   text,
+			b.Write.Unlock()
+			http.Redirect(w, r, "/"+b.Name+"/", http.StatusFound)
+		} else {
+			threadid, err := strconv.ParseUint(sthreadid, 10, 64)
+			if err != nil {
+				http.NotFound(w, r)
+				return
 			}
-			board.PostCounter++
-			board.MediaCounter += uint64(len(media))
-			thread.AddPost(post)
+			thread, err := b.GetThreadById(threadid)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			b.Write.Lock()
+			{
+				// TODO find a way to process media without write lock
+				media, err := processMediaOfRequest(b, r)
+				if err != nil {
+					for _, m := range media {
+						deleteMediumFiles(b, m)
+					}
+					b.Write.Unlock()
+					http.Error(w, "media upload failed: "+err.Error(),
+						http.StatusBadRequest)
+					return
+				}
+				post := Post{
+					Id:     b.PostCounter,
+					Posted: time.Now(),
+					Media:  media,
+					Text:   text,
+				}
+				b.PostCounter++
+				b.MediaCounter += uint64(len(media))
+				thread.AddPost(post)
+			}
+			b.Write.Unlock()
+			http.Redirect(w, r,
+				fmt.Sprintf("/%s/thread/%d", b.Name, thread.Id),
+				http.StatusFound)
 		}
-		board.Write.Unlock()
-		http.Redirect(w, r,
-			fmt.Sprintf("/%s/thread/%d", board.Name, thread.Id),
-			http.StatusFound)
 	}
 }
 
@@ -395,6 +459,7 @@ func main() {
 			MaxPostLength:   200,
 			MaxThumbWidth:   200,
 			MaxThumbHeight:  200,
+			MaxFileSize:     10 * 1024 * 1024,
 		},
 		{
 			Name:            "int",
@@ -406,6 +471,7 @@ func main() {
 			MaxPostLength:   200,
 			MaxThumbWidth:   200,
 			MaxThumbHeight:  200,
+			MaxFileSize:     10 * 1024 * 1024,
 		},
 	}
 
