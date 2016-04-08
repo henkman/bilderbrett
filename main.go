@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"image"
+	"image/draw"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
@@ -33,6 +34,7 @@ type MediumType uint8
 
 const (
 	MediumType_Image MediumType = iota
+	MediumType_Gif
 	MediumType_Webm
 	MediumType_Archive
 	MediumType_Text
@@ -84,16 +86,17 @@ func (ts Threads) Less(i, j int) bool {
 }
 
 type BoardConfiguration struct {
-	Name            string
-	Pages           uint
-	ThreadsPerPage  uint
-	BoardTmpl       string
-	ThreadTmpl      string
-	MaxMediaPerPost uint
-	MaxPostLength   uint
-	MaxThumbWidth   uint
-	MaxThumbHeight  uint
-	MaxFileSize     uint64
+	Name                     string
+	Pages                    uint
+	ThreadsPerPage           uint
+	BoardTmpl                string
+	ThreadTmpl               string
+	MaxMediaPerPost          uint
+	MaxPostLength            uint
+	MaxThumbWidth            uint
+	MaxThumbHeight           uint
+	MaxFileSize              uint64
+	NewThreadsMustHaveMedium bool
 }
 
 type Board struct {
@@ -106,10 +109,10 @@ type Board struct {
 }
 
 func (b *Board) AddThread(thread Thread) {
-	sort.Sort(b.Threads)
 	if len(b.Threads) < cap(b.Threads) {
 		b.Threads = append(b.Threads, thread)
 	} else {
+		// TODO delete media of the dead thread/posts
 		for i := len(b.Threads) - 1; i > 0; i-- {
 			b.Threads[i] = b.Threads[i-1]
 		}
@@ -238,11 +241,12 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 		{
 			var typ MediumType
 			ext := strings.ToLower(filepath.Ext(file.Filename))
-			if ext == ".gif" ||
-				ext == ".jpg" ||
+			if ext == ".jpg" ||
 				ext == ".jpeg" ||
 				ext == ".png" {
 				typ = MediumType_Image
+			} else if ext == ".gif" {
+				typ = MediumType_Gif
 			} else {
 				return media, errors.New("invalid extension for file " +
 					file.Filename)
@@ -298,29 +302,41 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 								dst.Close()
 								return media, errors.New("jpeg.Encode()")
 							}
-						case "gif":
-							if err := gif.Encode(dst, thmb, nil); err != nil {
-								dst.Close()
-								return media, errors.New("gif.Encode()")
-							}
 						}
 						dst.Close()
 					}
 					src.Seek(0, os.SEEK_SET)
-					{
-						name := fmt.Sprint("./media/", board.Name,
-							medium.Id, medium.Extension)
-						dst, err := os.OpenFile(name,
-							os.O_CREATE|os.O_WRONLY, 0600)
-						if err != nil {
-							return media, errors.New("os.OpenFile(original)")
-						}
-						if _, err := io.Copy(dst, src); err != nil {
-							dst.Close()
-							return media, errors.New("io.Copy()")
-						}
-						dst.Close()
+				}
+			case MediumType_Gif:
+				{
+					// NOTE is it a good idea to have animated thumbnails?
+					g, err := gif.DecodeAll(src)
+					if err != nil {
+						return media, errors.New("gif.DecodeAll()")
 					}
+					for i, _ := range g.Image {
+						r := resize.Thumbnail(
+							board.MaxThumbWidth, board.MaxThumbWidth,
+							g.Image[i], resize.Bicubic)
+						p := image.NewPaletted(r.Bounds(), g.Image[i].Palette)
+						draw.Draw(p, p.Bounds(), r, image.ZP, draw.Src)
+						g.Image[i] = p
+					}
+					g.Config.Width = g.Image[0].Bounds().Dx()
+					g.Config.Height = g.Image[0].Bounds().Dy()
+					name := fmt.Sprint("./thumb/", board.Name,
+						medium.Id, medium.Extension)
+					dst, err := os.OpenFile(name,
+						os.O_CREATE|os.O_WRONLY, 0600)
+					if err != nil {
+						return media, errors.New("os.OpenFile(thumb)")
+					}
+					if err := gif.EncodeAll(dst, g); err != nil {
+						dst.Close()
+						return media, errors.New("gif.EncodeAll()")
+					}
+					dst.Close()
+					src.Seek(0, os.SEEK_SET)
 				}
 			case MediumType_Webm:
 				{
@@ -331,6 +347,20 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 			case MediumType_Text:
 				{
 				}
+			}
+			{ // write original
+				name := fmt.Sprint("./media/", board.Name,
+					medium.Id, medium.Extension)
+				dst, err := os.OpenFile(name,
+					os.O_CREATE|os.O_WRONLY, 0600)
+				if err != nil {
+					return media, errors.New("os.OpenFile(original)")
+				}
+				if _, err := io.Copy(dst, src); err != nil {
+					dst.Close()
+					return media, errors.New("io.Copy()")
+				}
+				dst.Close()
 			}
 			media = append(media, medium)
 		}
@@ -389,10 +419,15 @@ func makePostHandler(b *Board) httprouter.Handle {
 						http.StatusBadRequest)
 					return
 				}
+				if b.NewThreadsMustHaveMedium && len(media) == 0 {
+					http.Error(w, "threads must include a medium",
+						http.StatusBadRequest)
+					return
+				}
 				thread := Thread{
 					Post: Post{
 						Id:     b.PostCounter,
-						Posted: time.Now(),
+						Posted: time.Now().UTC(),
 						Media:  media,
 						Text:   text,
 					},
@@ -401,6 +436,7 @@ func makePostHandler(b *Board) httprouter.Handle {
 				b.PostCounter++
 				b.MediaCounter += uint64(len(media))
 				b.AddThread(thread)
+				sort.Sort(b.Threads)
 			}
 			b.Write.Unlock()
 			http.Redirect(w, r, "/"+b.Name+"/", http.StatusFound)
@@ -415,6 +451,8 @@ func makePostHandler(b *Board) httprouter.Handle {
 				http.NotFound(w, r)
 				return
 			}
+			// NOTE sort.Sort invalidates the thread pointer so we save id here
+			tid := thread.Id
 			b.Write.Lock()
 			{
 				// TODO find a way to process media without write lock
@@ -430,17 +468,18 @@ func makePostHandler(b *Board) httprouter.Handle {
 				}
 				post := Post{
 					Id:     b.PostCounter,
-					Posted: time.Now(),
+					Posted: time.Now().UTC(),
 					Media:  media,
 					Text:   text,
 				}
 				b.PostCounter++
 				b.MediaCounter += uint64(len(media))
 				thread.AddPost(post)
+				sort.Sort(b.Threads)
 			}
 			b.Write.Unlock()
 			http.Redirect(w, r,
-				fmt.Sprintf("/%s/thread/%d", b.Name, thread.Id),
+				fmt.Sprintf("/%s/thread/%d", b.Name, tid),
 				http.StatusFound)
 		}
 	}
@@ -450,28 +489,30 @@ func main() {
 	// TODO load the board configuration from json
 	boardconfigs := []BoardConfiguration{
 		{
-			Name:            "b",
-			BoardTmpl:       "board.tmpl",
-			ThreadTmpl:      "thread.tmpl",
-			Pages:           2,
-			ThreadsPerPage:  10,
-			MaxMediaPerPost: 4,
-			MaxPostLength:   200,
-			MaxThumbWidth:   200,
-			MaxThumbHeight:  200,
-			MaxFileSize:     10 * 1024 * 1024,
+			Name:                     "b",
+			BoardTmpl:                "board.tmpl",
+			ThreadTmpl:               "thread.tmpl",
+			Pages:                    2,
+			ThreadsPerPage:           10,
+			MaxMediaPerPost:          4,
+			MaxPostLength:            200,
+			MaxThumbWidth:            200,
+			MaxThumbHeight:           200,
+			MaxFileSize:              10 * 1024 * 1024,
+			NewThreadsMustHaveMedium: true,
 		},
 		{
-			Name:            "int",
-			BoardTmpl:       "board.tmpl",
-			ThreadTmpl:      "thread.tmpl",
-			Pages:           2,
-			ThreadsPerPage:  10,
-			MaxMediaPerPost: 4,
-			MaxPostLength:   200,
-			MaxThumbWidth:   200,
-			MaxThumbHeight:  200,
-			MaxFileSize:     10 * 1024 * 1024,
+			Name:                     "int",
+			BoardTmpl:                "board.tmpl",
+			ThreadTmpl:               "thread.tmpl",
+			Pages:                    2,
+			ThreadsPerPage:           10,
+			MaxMediaPerPost:          4,
+			MaxPostLength:            200,
+			MaxThumbWidth:            200,
+			MaxThumbHeight:           200,
+			MaxFileSize:              10 * 1024 * 1024,
+			NewThreadsMustHaveMedium: true,
 		},
 	}
 
@@ -487,7 +528,7 @@ func main() {
 
 	{ // test data, replace with code that loads from json
 		board := &boards[0]
-		for i := 0; i < 25; i++ {
+		for i := 0; i < 21; i++ {
 			board.AddThread(Thread{
 				Post: Post{
 					Media: []Medium{
@@ -512,6 +553,7 @@ func main() {
 			board.PostCounter++
 			board.MediaCounter += 2
 		}
+		sort.Sort(board.Threads)
 	}
 
 	{
