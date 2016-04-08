@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -26,6 +27,7 @@ import (
 )
 
 var (
+	logger *log.Logger
 	boards []Board
 	tmpls  *template.Template
 )
@@ -97,13 +99,14 @@ type BoardConfiguration struct {
 	MaxThumbHeight           uint
 	MaxFileSize              uint64
 	NewThreadsMustHaveMedium bool
+	BackupInterval           time.Duration
 }
 
 type Board struct {
-	BoardConfiguration
+	BoardConfiguration `json:"-"`
 
 	Threads      Threads
-	Write        sync.Mutex
+	Write        sync.Mutex `json:"-"`
 	PostCounter  uint64
 	MediaCounter uint64
 }
@@ -112,9 +115,18 @@ func (b *Board) AddThread(thread Thread) {
 	if len(b.Threads) < cap(b.Threads) {
 		b.Threads = append(b.Threads, thread)
 	} else {
-		// TODO delete media of the dead thread/posts
 		for i := len(b.Threads) - 1; i > 0; i-- {
 			b.Threads[i] = b.Threads[i-1]
+		}
+		{ // NOTE delete media of dead thread
+			for _, m := range b.Threads[0].Media {
+				deleteMediumFiles(b, m)
+			}
+			for _, p := range b.Threads[0].Posts {
+				for _, m := range p.Media {
+					deleteMediumFiles(b, m)
+				}
+			}
 		}
 		b.Threads[0] = thread
 	}
@@ -144,13 +156,13 @@ func (b *Board) AvailablePages() uint {
 	return max
 }
 
-func (b *Board) GetThreadById(id uint64) (*Thread, error) {
+func (b *Board) GetThreadById(id uint64) *Thread {
 	for i, _ := range b.Threads {
 		if b.Threads[i].Id == id {
-			return &b.Threads[i], nil
+			return &b.Threads[i]
 		}
 	}
-	return nil, errors.New("thread not found")
+	return nil
 }
 
 func indexHandler(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
@@ -164,8 +176,8 @@ func makeThreadHandler(board *Board) httprouter.Handle {
 			http.NotFound(w, r)
 			return
 		}
-		thread, err := board.GetThreadById(id)
-		if err != nil {
+		thread := board.GetThreadById(id)
+		if thread == nil {
 			http.NotFound(w, r)
 			return
 		}
@@ -197,6 +209,7 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		threads := board.GetThreadsOfPage(page)
 		lastpage := board.AvailablePages()
+		// TODO find a better way to get for loops in templates
 		pages := make([]uint, lastpage)
 		var i uint
 		for i = 0; i < lastpage; i++ {
@@ -218,6 +231,28 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 			maxmedia,
 		})
 	}
+}
+
+func fitThumbnail(ow, oh, mw, mh uint) (uint, uint, bool) {
+	if ow < mw && oh < mh {
+		return ow, oh, false
+	}
+	nw, nh := ow, oh
+	if nw > mw {
+		nh = uint(oh * mw / ow)
+		if nh < 1 {
+			nh = 1
+		}
+		nw = mw
+	}
+	if nh > mh {
+		nw = uint(nw * mh / nh)
+		if nw < 1 {
+			nw = 1
+		}
+		nh = mh
+	}
+	return nw, nh, true
 }
 
 func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
@@ -273,57 +308,67 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 			}
 			src.Seek(0, os.SEEK_SET)
 
+			// TODO speed up thumbnail creation
+			// TODO do not write thumbnails smaller than max allowed
 			switch medium.Type {
 			case MediumType_Image:
 				{
-					{
-						img, format, err := image.Decode(src)
-						if err != nil {
-							return media, errors.New("image.Decode()")
-						}
-						thmb := resize.Thumbnail(
-							board.MaxThumbWidth, board.MaxThumbWidth,
-							img, resize.Bicubic)
-						name := fmt.Sprint("./thumb/", board.Name,
-							medium.Id, medium.Extension)
-						dst, err := os.OpenFile(name,
-							os.O_CREATE|os.O_WRONLY, 0600)
-						if err != nil {
-							return media, errors.New("os.OpenFile(thumb)")
-						}
-						switch format {
-						case "png":
-							if err := png.Encode(dst, thmb); err != nil {
-								dst.Close()
-								return media, errors.New("png.Encode()")
-							}
-						case "jpeg":
-							if err := jpeg.Encode(dst, thmb, nil); err != nil {
-								dst.Close()
-								return media, errors.New("jpeg.Encode()")
-							}
-						}
-						dst.Close()
+					img, format, err := image.Decode(src)
+					if err != nil {
+						return media, errors.New("image.Decode()")
 					}
+					b := img.Bounds()
+					var thmb image.Image
+					if w, h, ok := fitThumbnail(uint(b.Dx()), uint(b.Dy()),
+						board.MaxThumbWidth, board.MaxThumbWidth); ok {
+						thmb = resize.Resize(w, h, img,
+							resize.NearestNeighbor)
+					} else {
+						thmb = img
+					}
+					name := fmt.Sprint("./thumb/", board.Name,
+						medium.Id, medium.Extension)
+					dst, err := os.OpenFile(name,
+						os.O_CREATE|os.O_WRONLY, 0600)
+					if err != nil {
+						return media, errors.New("os.OpenFile(thumb)")
+					}
+					switch format {
+					case "png":
+						if err := png.Encode(dst, thmb); err != nil {
+							dst.Close()
+							return media, errors.New("png.Encode()")
+						}
+					case "jpeg":
+						if err := jpeg.Encode(dst, thmb, nil); err != nil {
+							dst.Close()
+							return media, errors.New("jpeg.Encode()")
+						}
+					}
+					dst.Close()
 					src.Seek(0, os.SEEK_SET)
 				}
 			case MediumType_Gif:
 				{
-					// NOTE is it a good idea to have animated thumbnails?
 					g, err := gif.DecodeAll(src)
 					if err != nil {
 						return media, errors.New("gif.DecodeAll()")
 					}
-					for i, _ := range g.Image {
-						r := resize.Thumbnail(
-							board.MaxThumbWidth, board.MaxThumbWidth,
-							g.Image[i], resize.Bicubic)
-						p := image.NewPaletted(r.Bounds(), g.Image[i].Palette)
-						draw.Draw(p, p.Bounds(), r, image.ZP, draw.Src)
-						g.Image[i] = p
+					if w, h, ok := fitThumbnail(
+						uint(g.Config.Width), uint(g.Config.Height),
+						board.MaxThumbWidth, board.MaxThumbHeight); ok {
+						for i, _ := range g.Image {
+							p := &g.Image[i]
+							r := resize.Resize(w, h, *p, resize.NearestNeighbor)
+							b := r.Bounds()
+							(*p).Pix = (*p).Pix[:1*w*h]
+							(*p).Stride = int(1 * w)
+							(*p).Rect = b
+							draw.Draw(*p, b, r, b.Min, draw.Src)
+						}
+						g.Config.Width = int(w)
+						g.Config.Height = int(h)
 					}
-					g.Config.Width = g.Image[0].Bounds().Dx()
-					g.Config.Height = g.Image[0].Bounds().Dy()
 					name := fmt.Sprint("./thumb/", board.Name,
 						medium.Id, medium.Extension)
 					dst, err := os.OpenFile(name,
@@ -348,7 +393,7 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 				{
 				}
 			}
-			{ // write original
+			{ // NOTE write original file
 				name := fmt.Sprint("./media/", board.Name,
 					medium.Id, medium.Extension)
 				dst, err := os.OpenFile(name,
@@ -446,8 +491,8 @@ func makePostHandler(b *Board) httprouter.Handle {
 				http.NotFound(w, r)
 				return
 			}
-			thread, err := b.GetThreadById(threadid)
-			if err != nil {
+			thread := b.GetThreadById(threadid)
+			if thread == nil {
 				http.NotFound(w, r)
 				return
 			}
@@ -485,85 +530,96 @@ func makePostHandler(b *Board) httprouter.Handle {
 	}
 }
 
-func main() {
-	// TODO load the board configuration from json
-	boardconfigs := []BoardConfiguration{
+func backupRoutine(b *Board) {
+	tick := time.NewTicker(b.BackupInterval)
+	for {
+		<-tick.C
+		logger.Println("starting backup of", b.Name)
+		b.Write.Lock()
 		{
-			Name:                     "b",
-			BoardTmpl:                "board.tmpl",
-			ThreadTmpl:               "thread.tmpl",
-			Pages:                    2,
-			ThreadsPerPage:           10,
-			MaxMediaPerPost:          4,
-			MaxPostLength:            200,
-			MaxThumbWidth:            200,
-			MaxThumbHeight:           200,
-			MaxFileSize:              10 * 1024 * 1024,
-			NewThreadsMustHaveMedium: true,
-		},
-		{
-			Name:                     "int",
-			BoardTmpl:                "board.tmpl",
-			ThreadTmpl:               "thread.tmpl",
-			Pages:                    2,
-			ThreadsPerPage:           10,
-			MaxMediaPerPost:          4,
-			MaxPostLength:            200,
-			MaxThumbWidth:            200,
-			MaxThumbHeight:           200,
-			MaxFileSize:              10 * 1024 * 1024,
-			NewThreadsMustHaveMedium: true,
-		},
-	}
-
-	boards := make([]Board, len(boardconfigs))
-	for i, _ := range boards {
-		boards[i].BoardConfiguration = boardconfigs[i]
-		boards[i].Threads = make([]Thread, 0,
-			boards[i].Pages*boards[i].ThreadsPerPage)
-	}
-
-	// TODO write routine that dumps a board in an interval to json
-	// TODO load the json dumped data at start
-
-	{ // test data, replace with code that loads from json
-		board := &boards[0]
-		for i := 0; i < 21; i++ {
-			board.AddThread(Thread{
-				Post: Post{
-					Media: []Medium{
-						{
-							board.MediaCounter,
-							MediumType_Image,
-							"blorb.png",
-							".png",
-						},
-						{
-							board.MediaCounter + 1,
-							MediumType_Image,
-							"blorb.png",
-							".png",
-						},
-					},
-					Id:     board.PostCounter,
-					Posted: time.Date(2000, 4, 5, 5, i, 42, 54, time.UTC),
-					Text:   fmt.Sprint("hello world ", i),
-				},
-			})
-			board.PostCounter++
-			board.MediaCounter += 2
+			fd, err := os.OpenFile(
+				fmt.Sprint("./backup/", b.Name, ".json"),
+				os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+			if err != nil {
+				logger.Println("backup of", b.Name, "failed:",
+					err.Error())
+				b.Write.Unlock()
+				continue
+			}
+			if err := json.NewEncoder(fd).Encode(b); err != nil {
+				logger.Println("backup of", b.Name, "failed:",
+					err.Error())
+				fd.Close()
+				b.Write.Unlock()
+				continue
+			}
+			fd.Close()
 		}
-		sort.Sort(board.Threads)
+		b.Write.Unlock()
+		logger.Println("backup of", b.Name, "successful")
 	}
+}
 
+func main() {
+	// TODO also/only write log to file
+	logger = log.New(os.Stderr, "", log.LUTC)
+
+	var boardconfigs []BoardConfiguration
+	{
+		fd, err := os.OpenFile(
+			fmt.Sprint("./config.json"),
+			os.O_RDONLY, 0600)
+		if err != nil {
+			logger.Fatal("could not read config.json")
+			return
+		}
+		jd := json.NewDecoder(fd)
+		var config struct {
+			Boards []BoardConfiguration
+		}
+		if err := jd.Decode(&config); err != nil {
+			logger.Fatal("could not parse config.json: ", err)
+			fd.Close()
+			return
+		}
+		fd.Close()
+		if len(config.Boards) == 0 {
+			logger.Fatal("no boards configured in config.json")
+			return
+		}
+		boardconfigs = config.Boards
+	}
 	{
 		t, err := template.ParseGlob("./tmpl/*.tmpl")
 		if err != nil {
-			panic(err)
+			logger.Fatal("could not load templates: ", err)
+			return
 		}
 		tmpls = t
 	}
-
+	boards := make([]Board, len(boardconfigs))
+	for i, _ := range boards {
+		b := &boards[i]
+		b.BoardConfiguration = boardconfigs[i]
+		b.Threads = make([]Thread, 0, b.Pages*b.ThreadsPerPage)
+		{
+			fd, err := os.OpenFile(
+				fmt.Sprint("./backup/", b.Name, ".json"),
+				os.O_RDONLY, 0600)
+			if err == nil {
+				jd := json.NewDecoder(fd)
+				var bu Board
+				jd.Decode(&bu)
+				fd.Close()
+				b.MediaCounter = bu.MediaCounter
+				b.PostCounter = bu.PostCounter
+				b.Threads = append(b.Threads, bu.Threads...)
+			}
+		}
+		if b.BackupInterval > 0 {
+			go backupRoutine(b)
+		}
+	}
 	router := httprouter.New()
 	router.GET("/", indexHandler)
 	for i, _ := range boards {
@@ -580,5 +636,5 @@ func main() {
 	}
 	router.ServeFiles("/thumb/*filepath", http.Dir("./thumb/"))
 	router.ServeFiles("/media/*filepath", http.Dir("./media/"))
-	log.Fatal(http.ListenAndServe(":8080", router))
+	logger.Fatal(http.ListenAndServe(":8080", router))
 }

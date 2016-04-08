@@ -1,0 +1,32 @@
+{
+	"Boards": [
+		{
+			"Name": "b",
+			"Pages": 2,
+			"ThreadsPerPage": 10,
+			"BoardTmpl": "board.tmpl",
+			"ThreadTmpl": "thread.tmpl",
+			"MaxMediaPerPost": 4,
+			"MaxPostLength": 200,
+			"MaxThumbWidth": 200,
+			"MaxThumbHeight": 200,
+			"MaxFileSize": 10485760,
+			"NewThreadsMustHaveMedium": true,
+			"BackupInterval": 900000000000
+		},
+		{
+			"Name": "int",
+			"Pages": 2,
+			"ThreadsPerPage": 10,
+			"BoardTmpl": "board.tmpl",
+			"ThreadTmpl": "thread.tmpl",
+			"MaxMediaPerPost": 4,
+			"MaxPostLength": 200,
+			"MaxThumbWidth": 200,
+			"MaxThumbHeight": 200,
+			"MaxFileSize": 10485760,
+			"NewThreadsMustHaveMedium": true,
+			"BackupInterval": 900000000000
+		}
+	]
+}
