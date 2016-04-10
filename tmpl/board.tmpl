@@ -3,14 +3,44 @@
 <head>
 	<title></title>
 	<style>
-		.thread {
-			border-style: solid;
-		}
+	.thread {
+		border-style: solid;
+	}
 	</style>
+	<script>
+	function setSrcQuery(e, q) {
+		var src  = e.src;
+		var p = src.indexOf('?');
+		if (p >= 0) {
+			src = src.substr(0, p);
+		}
+		e.src = src + "?" + q
+	}
+	function playAudio() {
+		var le = document.getElementById("lang");
+		var lang = le.options[le.selectedIndex].value;
+		var e = document.getElementById('audio')
+		setSrcQuery(e, "lang=" + lang)
+		e.style.display = 'block';
+		e.autoplay = 'true';
+		return false;
+	}
+	function changeLang() {
+		var e = document.getElementById('audio')
+		if (e.style.display == 'block') {
+			playAudio();
+		}
+	}
+	function reload() {
+		setSrcQuery(document.getElementById('image'), "reload=" + (new Date()).getTime());
+		setSrcQuery(document.getElementById('audio'), (new Date()).getTime());
+		return false;
+	}
+	</script>
 </head>
 <body>
 	{{$board := .Name}}
-	<div>
+	<div class="postform">
 		<form method="post" action="/{{$board}}/" enctype="multipart/form-data">
 			<div class="fileupload">
 				{{range .MaxMedia}}
@@ -18,7 +48,29 @@
 				{{end}}
 			</div>
 			<textarea name="text" rows="4" cols="40"></textarea><br/>
-			<input type="submit" value="upload" />
+			{{if .NeedsCaptcha}}
+			<div class="captcha">
+				<p>Type the numbers you see in the picture below:</p>
+				<p>
+					<img id="image" src="/captcha/{{.Captcha}}.png" alt="Captcha image">
+				</p>
+				<select id="lang" onchange="changeLang()">
+					<option value="en">English</option>
+					<option value="ru">Russian</option>
+					<option value="zh">Chinese</option>
+				</select>
+				<a href="#" onclick="reload()">Reload</a> | <a href="#" onclick="playAudio()">
+					Play Audio
+				</a>
+				<audio id="audio" controls style="display:none" src="/captcha/{{.Captcha}}.wav" preload="none">
+					You browser doesn't support audio.
+					<a href="/captcha/download/{{.Captcha}}.wav">Download file</a> to play it in the external player.
+				</audio>
+				<input type="hidden" name="captcha" value="{{.Captcha}}"><br/>
+				<input type="text" name="captchaSolution"><br/>
+			</div>
+			{{end}}
+			<input type="submit" value="Post" />
 		</form>
 	</div>
 	{{range .Threads}}

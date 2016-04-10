@@ -12,7 +12,8 @@
 			"MaxThumbHeight": 200,
 			"MaxFileSize": 10485760,
 			"NewThreadsMustHaveMedium": true,
-			"BackupInterval": 900000000000
+			"BackupInterval": 900000000000,
+			"CaptchaExpiration": 900000000000
 		},
 		{
 			"Name": "int",
@@ -26,7 +27,8 @@
 			"MaxThumbHeight": 200,
 			"MaxFileSize": 10485760,
 			"NewThreadsMustHaveMedium": true,
-			"BackupInterval": 900000000000
+			"BackupInterval": 900000000000,
+			"CaptchaExpiration": 900000000000
 		}
 	]
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,15 +23,34 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dchest/captcha"
 	"github.com/julienschmidt/httprouter"
+	"github.com/kr/session"
 	"github.com/nfnt/resize"
 )
 
 var (
+	sessionConfig = session.Config{
+		// Domain:"",
+		Name:     "session",
+		Path:     "/",
+		Secure:   false,
+		HTTPOnly: true,
+		MaxAge:   time.Duration(4) * time.Hour,
+		Keys:     make([]*[32]byte, 32),
+	}
 	logger *log.Logger
 	boards []Board
 	tmpls  *template.Template
 )
+
+type Session struct {
+	CaptchaValidUntil time.Time
+}
+
+func (s *Session) NeedsCaptcha() bool {
+	return time.Now().UTC().After(s.CaptchaValidUntil)
+}
 
 type MediumType uint8
 
@@ -100,6 +120,7 @@ type BoardConfiguration struct {
 	MaxFileSize              uint64
 	NewThreadsMustHaveMedium bool
 	BackupInterval           time.Duration
+	CaptchaExpiration        time.Duration
 }
 
 type Board struct {
@@ -191,16 +212,29 @@ func makeThreadHandler(board *Board) httprouter.Handle {
 		for i = 0; i < board.MaxMediaPerPost; i++ {
 			maxmedia[i] = i
 		}
+		needsCaptcha := false
+		{
+			var s Session
+			err := session.Get(r, &s, &sessionConfig)
+			if err != nil || s.NeedsCaptcha() {
+				needsCaptcha = true
+			}
+		}
+		// TODO only generate captcha if needed
 		tmpls.ExecuteTemplate(w, board.ThreadTmpl, struct {
-			Name     string
-			Thread   Thread
-			Pages    []uint
-			MaxMedia []uint
+			Name         string
+			Thread       Thread
+			Pages        []uint
+			MaxMedia     []uint
+			Captcha      string
+			NeedsCaptcha bool
 		}{
 			board.Name,
 			*thread,
 			pages,
 			maxmedia,
+			captcha.New(),
+			needsCaptcha,
 		})
 	}
 }
@@ -219,16 +253,29 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 		for i = 0; i < board.MaxMediaPerPost; i++ {
 			maxmedia[i] = i
 		}
+		needsCaptcha := false
+		{
+			var s Session
+			err := session.Get(r, &s, &sessionConfig)
+			if err != nil || s.NeedsCaptcha() {
+				needsCaptcha = true
+			}
+		}
+		// TODO only generate captcha if needed
 		tmpls.ExecuteTemplate(w, board.BoardTmpl, struct {
-			Name     string
-			Threads  []Thread
-			Pages    []uint
-			MaxMedia []uint
+			Name         string
+			Threads      []Thread
+			Pages        []uint
+			MaxMedia     []uint
+			Captcha      string
+			NeedsCaptcha bool
 		}{
 			board.Name,
 			threads,
 			pages,
 			maxmedia,
+			captcha.New(),
+			needsCaptcha,
 		})
 	}
 }
@@ -419,6 +466,8 @@ func deleteMediumFiles(b *Board, m Medium) {
 		os.Remove(o)
 	}
 	switch m.Type {
+	case MediumType_Gif:
+		fallthrough
 	case MediumType_Image:
 		{
 			t := fmt.Sprint("./thumb/", b.Name, m.Id, m.Extension)
@@ -440,9 +489,23 @@ func deleteMediumFiles(b *Board, m Medium) {
 
 func makePostHandler(b *Board) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		// TODO add captcha (solve captcha once then add to session for a time)
+		// TODO remember solved captcha for a while in session
 		// TODO check IP for ban
 		// TODO rate limit posting
+		var s Session
+		err := session.Get(r, &s, &sessionConfig)
+		if err != nil || s.NeedsCaptcha() {
+			if !captcha.VerifyString(
+				r.FormValue("captcha"),
+				r.FormValue("captchaSolution")) {
+				http.Error(w, "captcha not solved", http.StatusBadRequest)
+				return
+			}
+			s.CaptchaValidUntil = time.Now().Add(b.CaptchaExpiration)
+			if err := session.Set(w, &s, &sessionConfig); err != nil {
+				logger.Println("could not set session:", err.Error())
+			}
+		}
 		text := r.FormValue("text")
 		if uint(len(text)) > b.MaxPostLength {
 			http.Error(w, "text too long", http.StatusBadRequest)
@@ -465,6 +528,7 @@ func makePostHandler(b *Board) httprouter.Handle {
 					return
 				}
 				if b.NewThreadsMustHaveMedium && len(media) == 0 {
+					b.Write.Unlock()
 					http.Error(w, "threads must include a medium",
 						http.StatusBadRequest)
 					return
@@ -590,6 +654,16 @@ func main() {
 		boardconfigs = config.Boards
 	}
 	{
+		for i, _ := range sessionConfig.Keys {
+			key := [32]byte{}
+			if _, err := rand.Read(key[:]); err != nil {
+				logger.Fatal("could not generate keys for session store")
+				return
+			}
+			sessionConfig.Keys[i] = &key
+		}
+	}
+	{
 		t, err := template.ParseGlob("./tmpl/*.tmpl")
 		if err != nil {
 			logger.Fatal("could not load templates: ", err)
@@ -634,6 +708,8 @@ func main() {
 				makeBoardHandler(board, i))
 		}
 	}
+	router.Handler("GET", "/captcha/*filepath",
+		captcha.Server(captcha.StdWidth, captcha.StdHeight))
 	router.ServeFiles("/thumb/*filepath", http.Dir("./thumb/"))
 	router.ServeFiles("/media/*filepath", http.Dir("./media/"))
 	logger.Fatal(http.ListenAndServe(":8080", router))
