@@ -2,41 +2,8 @@
 <html>
 <head>
 	<title></title>
-	<style>
-	.thread {
-		border-style: solid;
-	}
-	</style>
-	<script>
-	function setSrcQuery(e, q) {
-		var src  = e.src;
-		var p = src.indexOf('?');
-		if (p >= 0) {
-			src = src.substr(0, p);
-		}
-		e.src = src + "?" + q
-	}
-	function playAudio() {
-		var le = document.getElementById("lang");
-		var lang = le.options[le.selectedIndex].value;
-		var e = document.getElementById('audio')
-		setSrcQuery(e, "lang=" + lang)
-		e.style.display = 'block';
-		e.autoplay = 'true';
-		return false;
-	}
-	function changeLang() {
-		var e = document.getElementById('audio')
-		if (e.style.display == 'block') {
-			playAudio();
-		}
-	}
-	function reload() {
-		setSrcQuery(document.getElementById('image'), "reload=" + (new Date()).getTime());
-		setSrcQuery(document.getElementById('audio'), (new Date()).getTime());
-		return false;
-	}
-	</script>
+	<link rel="stylesheet" href="/res/style.css"></style>
+	<script src="/res/script.js"></script>
 </head>
 <body>
 	{{$board := .Name}}
@@ -50,85 +17,18 @@
 			</div>
 			<textarea name="text" rows="4" cols="40"></textarea><br/>
 			{{if .NeedsCaptcha}}
-			<div class="captcha">
-				<p>Type the numbers you see in the picture below:</p>
-				<p>
-					<img id="image" src="/captcha/{{.Captcha}}.png" alt="Captcha image">
-				</p>
-				<select id="lang" onchange="changeLang()">
-					<option value="en">English</option>
-					<option value="ru">Russian</option>
-					<option value="zh">Chinese</option>
-				</select>
-				<a href="#" onclick="reload()">Reload</a> | <a href="#" onclick="playAudio()">
-					Play Audio
-				</a>
-				<audio id="audio" controls style="display:none" src="/captcha/{{.Captcha}}.wav" preload="none">
-					You browser doesn't support audio.
-					<a href="/captcha/download/{{.Captcha}}.wav">Download file</a> to play it in the external player.
-				</audio>
-				<input type="hidden" name="captcha" value="{{.Captcha}}"><br/>
-				<input type="text" name="captchaSolution"><br/>
-			</div>
+			{{template "captcha" .Captcha}}
 			{{end}}
 			<input type="submit" value="Post" />
 		</form>
 	</div>
 	{{with .Thread}}
 	<div class="thread" id="thread_{{.Id}}">
-		<div class="post" id="post{{.Id}}">
-			<div class="header">
-				<div class="postid">
-					{{.Id}}
-				</div>
-				<div class="posted">
-					{{.Posted}}
-				</div>
-			</div>
-			{{if .Media}}
-			<div class="media">
-			{{range .Media}}
-				<div class="image" id="media_{{.Id}}">
-					<a href="/media/{{$board}}{{.Id}}{{.Extension}}">
-						<img src="/thumb/{{$board}}{{.Id}}{{.Extension}}"></img>
-						{{.Filename}}
-					</a>
-				</div>
-			{{end}}
-			</div>
-			{{end}}
-			<div class="text">
-				{{.Text}}
-			</div>
-		</div>
+		{{template "post" .Post}}
 		<hr/>
 		<div class="posts">
 			{{range .Posts}}
-			<div class="post" id="post{{.Id}}">
-				<div class="header">
-					<div class="postid">
-						{{.Id}}
-					</div>
-					<div class="posted">
-						{{.Posted}}
-					</div>
-				</div>
-				{{if .Media}}
-				<div class="media">
-				{{range .Media}}
-					<div class="image" id="media_{{.Id}}">
-						<a href="/media/{{$board}}{{.Id}}{{.Extension}}">
-							<img src="/thumb/{{$board}}{{.Id}}{{.Extension}}"></img>
-							{{.Filename}}
-						</a>
-					</div>
-				{{end}}
-				</div>
-				{{end}}
-				<div class="text">
-					{{.Text}}
-				</div>
-			</div>
+			{{template "post" .}}
 			{{end}}
 		</div>
 	</div>

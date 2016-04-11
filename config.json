@@ -1,4 +1,6 @@
 {
+	"LocalAddress":":8080",
+	"ServeStatic":true,
 	"Boards": [
 		{
 			"Name": "b",

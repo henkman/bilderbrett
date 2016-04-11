@@ -1,0 +1,27 @@
+{{define "post"}}
+<div class="post" id="post{{.Id}}">
+	<div class="header">
+		<div class="postid">
+			{{.Id}}
+		</div>
+		<div class="posted">
+			{{.Posted}}
+		</div>
+	</div>
+	{{if .Media}}
+	<div class="media">
+	{{range .Media}}
+		<div class="image" id="media_{{.Id}}">
+			<a href="/media/{{.Copy}}">
+				<img src="/thumb/{{.Copy}}"></img>
+				{{.Original}}
+			</a>
+		</div>
+	{{end}}
+	</div>
+	{{end}}
+	<div class="text">
+		{{.Text}}
+	</div>
+</div>
+{{end}}

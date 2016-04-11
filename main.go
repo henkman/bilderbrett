@@ -63,10 +63,10 @@ const (
 )
 
 type Medium struct {
-	Id        uint64
-	Type      MediumType
-	Filename  string
-	Extension string
+	Id       uint64
+	Type     MediumType
+	Original string
+	Copy     string
 }
 
 type Post struct {
@@ -334,11 +334,11 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 					file.Filename)
 			}
 			medium = Medium{
-				Id:        board.MediaCounter + uint64(i),
-				Type:      typ,
-				Filename:  file.Filename,
-				Extension: ext,
+				Id:       board.MediaCounter + uint64(i),
+				Type:     typ,
+				Original: file.Filename,
 			}
+			medium.Copy = fmt.Sprint(board.Name, medium.Id, ext)
 		}
 		{
 			src, err := file.Open()
@@ -373,8 +373,7 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 					} else {
 						thmb = img
 					}
-					name := fmt.Sprint("./thumb/", board.Name,
-						medium.Id, medium.Extension)
+					name := fmt.Sprint("./thumb/", medium.Copy)
 					dst, err := os.OpenFile(name,
 						os.O_CREATE|os.O_WRONLY, 0600)
 					if err != nil {
@@ -416,8 +415,7 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 						g.Config.Width = int(w)
 						g.Config.Height = int(h)
 					}
-					name := fmt.Sprint("./thumb/", board.Name,
-						medium.Id, medium.Extension)
+					name := fmt.Sprint("./thumb/", medium.Copy)
 					dst, err := os.OpenFile(name,
 						os.O_CREATE|os.O_WRONLY, 0600)
 					if err != nil {
@@ -441,8 +439,7 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 				}
 			}
 			{ // NOTE write original file
-				name := fmt.Sprint("./media/", board.Name,
-					medium.Id, medium.Extension)
+				name := fmt.Sprint("./media/", medium.Copy)
 				dst, err := os.OpenFile(name,
 					os.O_CREATE|os.O_WRONLY, 0600)
 				if err != nil {
@@ -461,7 +458,7 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 }
 
 func deleteMediumFiles(b *Board, m Medium) {
-	o := fmt.Sprint("./media/", b.Name, m.Id, m.Extension)
+	o := fmt.Sprint("./media/", m.Copy)
 	if _, err := os.Stat(o); err == nil {
 		os.Remove(o)
 	}
@@ -470,7 +467,7 @@ func deleteMediumFiles(b *Board, m Medium) {
 		fallthrough
 	case MediumType_Image:
 		{
-			t := fmt.Sprint("./thumb/", b.Name, m.Id, m.Extension)
+			t := fmt.Sprint("./thumb/", m.Copy)
 			if _, err := os.Stat(t); err == nil {
 				os.Remove(t)
 			}
@@ -628,6 +625,8 @@ func main() {
 	// TODO also/only write log to file
 	logger = log.New(os.Stderr, "", log.LUTC)
 
+	var localAddress string
+	var serveStatic bool
 	var boardconfigs []BoardConfiguration
 	{
 		fd, err := os.OpenFile(
@@ -639,7 +638,9 @@ func main() {
 		}
 		jd := json.NewDecoder(fd)
 		var config struct {
-			Boards []BoardConfiguration
+			LocalAddress string
+			ServeStatic  bool
+			Boards       []BoardConfiguration
 		}
 		if err := jd.Decode(&config); err != nil {
 			logger.Fatal("could not parse config.json: ", err)
@@ -651,6 +652,8 @@ func main() {
 			logger.Fatal("no boards configured in config.json")
 			return
 		}
+		localAddress = config.LocalAddress
+		serveStatic = config.ServeStatic
 		boardconfigs = config.Boards
 	}
 	{
@@ -710,7 +713,10 @@ func main() {
 	}
 	router.Handler("GET", "/captcha/*filepath",
 		captcha.Server(captcha.StdWidth, captcha.StdHeight))
-	router.ServeFiles("/thumb/*filepath", http.Dir("./thumb/"))
-	router.ServeFiles("/media/*filepath", http.Dir("./media/"))
-	logger.Fatal(http.ListenAndServe(":8080", router))
+	if serveStatic {
+		router.ServeFiles("/res/*filepath", http.Dir("./res"))
+		router.ServeFiles("/thumb/*filepath", http.Dir("./thumb"))
+		router.ServeFiles("/media/*filepath", http.Dir("./media"))
+	}
+	logger.Fatal(http.ListenAndServe(localAddress, router))
 }

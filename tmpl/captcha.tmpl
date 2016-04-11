@@ -1,0 +1,22 @@
+{{define "captcha"}}
+<div class="captcha">
+	<p>Type the numbers you see in the picture below:</p>
+	<p>
+		<img id="image" src="/captcha/{{.}}.png" alt="Captcha image">
+	</p>
+	<select id="lang" onchange="changeLang()">
+		<option value="en">English</option>
+		<option value="ru">Russian</option>
+		<option value="zh">Chinese</option>
+	</select>
+	<a href="#" onclick="reload()">Reload</a> | <a href="#" onclick="playAudio()">
+		Play Audio
+	</a>
+	<audio id="audio" controls style="display:none" src="/captcha/{{.}}.wav" preload="none">
+		You browser doesn't support audio.
+		<a href="/captcha/download/{{.}}.wav">Download file</a> to play it in the external player.
+	</audio>
+	<input type="hidden" name="captcha" value="{{.}}"/><br/>
+	<input type="text" name="captchaSolution"/><br/>
+</div>
+{{end}}
