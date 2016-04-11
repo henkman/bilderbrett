@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"html/template"
 	"image"
-	"image/draw"
-	"image/gif"
+	_ "image/gif"
 	"image/jpeg"
-	"image/png"
+	_ "image/png"
 	"io"
 	"log"
 	"mime/multipart"
@@ -67,6 +66,19 @@ type Medium struct {
 	Type     MediumType
 	Original string
 	Copy     string
+	Thumb    string
+}
+
+func (m Medium) IsImage() bool {
+	return m.Type == MediumType_Image
+}
+
+func (m Medium) IsGif() bool {
+	return m.Type == MediumType_Gif
+}
+
+func (m Medium) IsWebm() bool {
+	return m.Type == MediumType_Webm
 }
 
 type Post struct {
@@ -321,22 +333,24 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 	for i, file := range files {
 		var medium Medium
 		{
-			var typ MediumType
+			medium = Medium{
+				Id:       board.MediaCounter + uint64(i),
+				Original: file.Filename,
+			}
 			ext := strings.ToLower(filepath.Ext(file.Filename))
 			if ext == ".jpg" ||
 				ext == ".jpeg" ||
 				ext == ".png" {
-				typ = MediumType_Image
+				medium.Type = MediumType_Image
+				medium.Thumb = fmt.Sprint(board.Name, medium.Id, ".jpg")
 			} else if ext == ".gif" {
-				typ = MediumType_Gif
+				medium.Type = MediumType_Gif
+				medium.Thumb = fmt.Sprint(board.Name, medium.Id, ".jpg")
+			} else if ext == ".webm" {
+				medium.Type = MediumType_Webm
 			} else {
 				return media, errors.New("invalid extension for file " +
 					file.Filename)
-			}
-			medium = Medium{
-				Id:       board.MediaCounter + uint64(i),
-				Type:     typ,
-				Original: file.Filename,
 			}
 			medium.Copy = fmt.Sprint(board.Name, medium.Id, ext)
 		}
@@ -355,12 +369,14 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 			}
 			src.Seek(0, os.SEEK_SET)
 
-			// TODO speed up thumbnail creation
 			// TODO do not write thumbnails smaller than max allowed
 			switch medium.Type {
+			case MediumType_Gif:
+				// TODO maybe bring GIF thumbnails back (needs faster tool)
+				fallthrough
 			case MediumType_Image:
 				{
-					img, format, err := image.Decode(src)
+					img, _, err := image.Decode(src)
 					if err != nil {
 						return media, errors.New("image.Decode()")
 					}
@@ -373,57 +389,15 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 					} else {
 						thmb = img
 					}
-					name := fmt.Sprint("./thumb/", medium.Copy)
-					dst, err := os.OpenFile(name,
+					dst, err := os.OpenFile(
+						fmt.Sprint("./thumb/", medium.Thumb),
 						os.O_CREATE|os.O_WRONLY, 0600)
 					if err != nil {
 						return media, errors.New("os.OpenFile(thumb)")
 					}
-					switch format {
-					case "png":
-						if err := png.Encode(dst, thmb); err != nil {
-							dst.Close()
-							return media, errors.New("png.Encode()")
-						}
-					case "jpeg":
-						if err := jpeg.Encode(dst, thmb, nil); err != nil {
-							dst.Close()
-							return media, errors.New("jpeg.Encode()")
-						}
-					}
-					dst.Close()
-					src.Seek(0, os.SEEK_SET)
-				}
-			case MediumType_Gif:
-				{
-					g, err := gif.DecodeAll(src)
-					if err != nil {
-						return media, errors.New("gif.DecodeAll()")
-					}
-					if w, h, ok := fitThumbnail(
-						uint(g.Config.Width), uint(g.Config.Height),
-						board.MaxThumbWidth, board.MaxThumbHeight); ok {
-						for i, _ := range g.Image {
-							p := &g.Image[i]
-							r := resize.Resize(w, h, *p, resize.NearestNeighbor)
-							b := r.Bounds()
-							(*p).Pix = (*p).Pix[:1*w*h]
-							(*p).Stride = int(1 * w)
-							(*p).Rect = b
-							draw.Draw(*p, b, r, b.Min, draw.Src)
-						}
-						g.Config.Width = int(w)
-						g.Config.Height = int(h)
-					}
-					name := fmt.Sprint("./thumb/", medium.Copy)
-					dst, err := os.OpenFile(name,
-						os.O_CREATE|os.O_WRONLY, 0600)
-					if err != nil {
-						return media, errors.New("os.OpenFile(thumb)")
-					}
-					if err := gif.EncodeAll(dst, g); err != nil {
+					if err := jpeg.Encode(dst, thmb, nil); err != nil {
 						dst.Close()
-						return media, errors.New("gif.EncodeAll()")
+						return media, errors.New("jpeg.Encode()")
 					}
 					dst.Close()
 					src.Seek(0, os.SEEK_SET)

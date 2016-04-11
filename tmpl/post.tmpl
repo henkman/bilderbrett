@@ -9,23 +9,31 @@
 		</div>
 	</div>
 	<div class="postcontent">
-
 		<div class="message">
-
-			{{if .Media}}
-				<div class="attachments">
-				{{range .Media}}
-					<div class="image" id="media_{{.Id}}">
-						<a href="/media/{{.Copy}}">
-							{{.Original}}<br />
-							<img src="/thumb/{{.Copy}}" />
-						</a>
-					</div>
-				{{end}}
+		{{if .Media}}
+			<div class="attachments clearfix">
+			{{range .Media}}
+				{{if (or .IsImage .IsGif)}}
+				<div class="image" id="media_{{.Id}}">
+					<a href="/media/{{.Copy}}">
+						{{.Original}}<br />
+						<img src="/thumb/{{.Thumb}}" />
+					</a>
 				</div>
+				{{else if .IsWebm}}
+				<div class="webm" id="media_{{.Id}}">
+					<video width="280" height="200" preload='metadata' controls>
+						<source src="/media/{{.Copy}}" type="video/webm">
+					</video>
+					<a href="/media/{{.Copy}}">
+						{{.Original}}
+					</a>
+				</div>
+				{{end}}
 			{{end}}
-
-			{{.Text}}
+			</div>
+		{{end}}
+		{{.Text}}
 		</div>
 	</div>
 </div>
