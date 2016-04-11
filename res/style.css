@@ -10,7 +10,9 @@
 
 .post {
 	margin-bottom: 14px;
-	display: inline-block
+	display: inline-block;
+	background-color: #bbb;
+
 }
 
 
@@ -34,7 +36,6 @@
 
 .post .postcontent {
 	background-color: #bbb;
-	padding: 10px;
 }
 
 /* Post attachments */
@@ -45,14 +46,11 @@
 
 .image {
 	float: left;
-	margin-left: 10px;
-}
-
-.image a {
-	float: left;
+	display: block;
+	margin: 5px;
 }
 
 /* Post message */
 .post .postmessage {
-
+	margin-left: 20px;
 }

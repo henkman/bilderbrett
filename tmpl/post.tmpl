@@ -9,19 +9,22 @@
 		</div>
 	</div>
 	<div class="postcontent">
-		{{if .Media}}
-			<div class="attachments">
-			{{range .Media}}
-				<div class="image" id="media_{{.Id}}">
-					<a href="/media/{{.Copy}}">
-						{{.Original}}<br />
-						<img src="/thumb/{{.Copy}}" />
-					</a>
+
+		<div class="message">
+
+			{{if .Media}}
+				<div class="attachments">
+				{{range .Media}}
+					<div class="image" id="media_{{.Id}}">
+						<a href="/media/{{.Copy}}">
+							{{.Original}}<br />
+							<img src="/thumb/{{.Copy}}" />
+						</a>
+					</div>
+				{{end}}
 				</div>
 			{{end}}
-			</div>
-		{{end}}
-		<div class="message">
+
 			{{.Text}}
 		</div>
 	</div>
