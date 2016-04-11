@@ -22,10 +22,12 @@
 			<input type="submit" value="Post" />
 		</form>
 	</div>
+
+	<hr/>
+
 	{{with .Thread}}
 	<div class="thread" id="thread_{{.Id}}">
 		{{template "post" .Post}}
-		<hr/>
 		<div class="posts">
 			{{range .Posts}}
 			{{template "post" .}}
@@ -33,7 +35,7 @@
 		</div>
 	</div>
 	{{end}}
-	<div>			
+	<div>
 		{{range .Pages}}
 		<a href="/{{$board}}/{{.}}">{{.}}</a>
 		{{end}}

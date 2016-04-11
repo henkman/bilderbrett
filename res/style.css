@@ -1,3 +1,58 @@
-.thread {
-	border-style: solid;
+/* Reply form */
+
+.postform {
+	width: 200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* POSTS */
+
+.post {
+	margin-bottom: 14px;
+	display: inline-block
+}
+
+
+/* Post Header */
+
+.post .header {
+	background-color: #ccc;
+	border-bottom: 1px dashed;
+	padding: 4px;
+}
+
+.post .postid {
+	float: left;
+}
+
+.post .timestamp {
+	margin-left: 20px;
+}
+
+/* Post content */
+
+.post .postcontent {
+	background-color: #bbb;
+	padding: 10px;
+}
+
+/* Post attachments */
+
+.post .postcontent .attachments {
+	float: left;
+}
+
+.image {
+	float: left;
+	margin-left: 10px;
+}
+
+.image a {
+	float: left;
+}
+
+/* Post message */
+.post .postmessage {
+
 }
