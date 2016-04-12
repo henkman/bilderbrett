@@ -81,6 +81,13 @@ func (m Medium) IsWebm() bool {
 	return m.Type == MediumType_Webm
 }
 
+func (m Medium) ShortOriginal(n int) string {
+	if n > len(m.Original) {
+		return m.Original
+	}
+	return m.Original[:n] + "[..]"
+}
+
 type Post struct {
 	Id     uint64
 	Posted time.Time
@@ -224,15 +231,16 @@ func makeThreadHandler(board *Board) httprouter.Handle {
 		for i = 0; i < board.MaxMediaPerPost; i++ {
 			maxmedia[i] = i
 		}
+		var c string
 		needsCaptcha := false
 		{
 			var s Session
 			err := session.Get(r, &s, &sessionConfig)
 			if err != nil || s.NeedsCaptcha() {
 				needsCaptcha = true
+				c = captcha.New()
 			}
 		}
-		// TODO only generate captcha if needed
 		tmpls.ExecuteTemplate(w, board.ThreadTmpl, struct {
 			Name         string
 			Thread       Thread
@@ -245,7 +253,7 @@ func makeThreadHandler(board *Board) httprouter.Handle {
 			*thread,
 			pages,
 			maxmedia,
-			captcha.New(),
+			c,
 			needsCaptcha,
 		})
 	}
@@ -265,15 +273,16 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 		for i = 0; i < board.MaxMediaPerPost; i++ {
 			maxmedia[i] = i
 		}
+		var c string
 		needsCaptcha := false
 		{
 			var s Session
 			err := session.Get(r, &s, &sessionConfig)
 			if err != nil || s.NeedsCaptcha() {
 				needsCaptcha = true
+				c = captcha.New()
 			}
 		}
-		// TODO only generate captcha if needed
 		tmpls.ExecuteTemplate(w, board.BoardTmpl, struct {
 			Name         string
 			Threads      []Thread
@@ -286,7 +295,7 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 			threads,
 			pages,
 			maxmedia,
-			captcha.New(),
+			c,
 			needsCaptcha,
 		})
 	}
@@ -372,7 +381,7 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 			// TODO do not write thumbnails smaller than max allowed
 			switch medium.Type {
 			case MediumType_Gif:
-				// TODO maybe bring GIF thumbnails back (needs faster tool)
+				// TODO maybe bring animated thumbnails back (needs faster tool)
 				fallthrough
 			case MediumType_Image:
 				{
@@ -412,7 +421,7 @@ func processMediaOfRequest(board *Board, r *http.Request) ([]Medium, error) {
 				{
 				}
 			}
-			{ // NOTE write original file
+			{
 				name := fmt.Sprint("./media/", medium.Copy)
 				dst, err := os.OpenFile(name,
 					os.O_CREATE|os.O_WRONLY, 0600)
@@ -441,7 +450,7 @@ func deleteMediumFiles(b *Board, m Medium) {
 		fallthrough
 	case MediumType_Image:
 		{
-			t := fmt.Sprint("./thumb/", m.Copy)
+			t := fmt.Sprint("./thumb/", m.Thumb)
 			if _, err := os.Stat(t); err == nil {
 				os.Remove(t)
 			}
@@ -460,7 +469,6 @@ func deleteMediumFiles(b *Board, m Medium) {
 
 func makePostHandler(b *Board) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		// TODO remember solved captcha for a while in session
 		// TODO check IP for ban
 		// TODO rate limit posting
 		var s Session
@@ -477,7 +485,7 @@ func makePostHandler(b *Board) httprouter.Handle {
 				logger.Println("could not set session:", err.Error())
 			}
 		}
-		text := r.FormValue("text")
+		text := strings.TrimSpace(r.FormValue("text"))
 		if uint(len(text)) > b.MaxPostLength {
 			http.Error(w, "text too long", http.StatusBadRequest)
 			return
@@ -502,6 +510,11 @@ func makePostHandler(b *Board) httprouter.Handle {
 					b.Write.Unlock()
 					http.Error(w, "threads must include a medium",
 						http.StatusBadRequest)
+					return
+				}
+				if len(media) == 0 && len(text) == 0 {
+					b.Write.Unlock()
+					http.Error(w, "empty post", http.StatusBadRequest)
 					return
 				}
 				thread := Thread{
@@ -544,6 +557,11 @@ func makePostHandler(b *Board) httprouter.Handle {
 					b.Write.Unlock()
 					http.Error(w, "media upload failed: "+err.Error(),
 						http.StatusBadRequest)
+					return
+				}
+				if len(media) == 0 && len(text) == 0 {
+					b.Write.Unlock()
+					http.Error(w, "empty post", http.StatusBadRequest)
 					return
 				}
 				post := Post{

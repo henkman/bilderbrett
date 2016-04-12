@@ -15,18 +15,18 @@
 			{{range .Media}}
 				{{if (or .IsImage .IsGif)}}
 				<div class="image" id="media_{{.Id}}">
-					<a href="/media/{{.Copy}}">
-						{{.Original}}<br />
+					<a href="/media/{{.Copy}}" title="{{.Original}}">
+						{{.ShortOriginal 20}}<br />
 						<img src="/thumb/{{.Thumb}}" />
 					</a>
 				</div>
 				{{else if .IsWebm}}
 				<div class="webm" id="media_{{.Id}}">
-					<video width="280" height="200" preload='metadata' controls>
+					<video width="280" height="200" preload="metadata" controls>
 						<source src="/media/{{.Copy}}" type="video/webm">
 					</video>
-					<a href="/media/{{.Copy}}">
-						{{.Original}}
+					<a href="/media/{{.Copy}}" title="{{.Original}}">
+						{{.ShortOriginal 20}}
 					</a>
 				</div>
 				{{end}}
