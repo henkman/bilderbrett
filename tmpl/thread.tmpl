@@ -1,12 +1,43 @@
 <!DOCTYPE html>
 <html>
 <head>
-	<title></title>
+	<title>{{.Title}} - {{.Thread.Id}}</title>
 	<link rel="stylesheet" href="/res/style.css"></style>
 	<script src="/res/script.js"></script>
 </head>
 <body>
 	{{$board := .Name}}
+	
+	{{range .Boards}}
+	<a href="/{{.Name}}/">/{{.Name}}/</a>
+	{{end}}
+	<hr/>
+	
+	<div>
+		{{range .Pages}}
+		<a href="/{{$board}}/{{.}}">{{.}}</a>
+		{{end}}
+	</div>
+
+	{{with .Thread}}
+	<div class="thread" id="thread_{{.Id}}">
+		{{template "post" .Post}}
+		<div class="posts">
+			{{range .Posts}}
+			{{template "post" .}}
+			{{end}}
+		</div>
+	</div>
+	{{end}}
+	
+	<div>
+		{{range .Pages}}
+		<a href="/{{$board}}/{{.}}">{{.}}</a>
+		{{end}}
+	</div>
+
+	<hr/>
+	
 	<div class="postform">
 		<form method="post" action="/{{$board}}/" enctype="multipart/form-data">
 			<input type="hidden" name="thread" value="{{.Thread.Id}}" />
@@ -21,24 +52,6 @@
 			{{end}}
 			<input type="submit" value="Post" />
 		</form>
-	</div>
-
-	<hr/>
-
-	{{with .Thread}}
-	<div class="thread" id="thread_{{.Id}}">
-		{{template "post" .Post}}
-		<div class="posts">
-			{{range .Posts}}
-			{{template "post" .}}
-			{{end}}
-		</div>
-	</div>
-	{{end}}
-	<div>
-		{{range .Pages}}
-		<a href="/{{$board}}/{{.}}">{{.}}</a>
-		{{end}}
 	</div>
 </body>
 </html>

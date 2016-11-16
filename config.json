@@ -1,36 +1,39 @@
 {
-	"LocalAddress":":8080",
-	"ServeStatic":true,
-	"Boards": [
-		{
-			"Name": "b",
-			"Pages": 2,
-			"ThreadsPerPage": 10,
-			"BoardTmpl": "board.tmpl",
-			"ThreadTmpl": "thread.tmpl",
-			"MaxMediaPerPost": 4,
-			"MaxPostLength": 200,
-			"MaxThumbWidth": 200,
-			"MaxThumbHeight": 200,
-			"MaxFileSize": 10485760,
-			"NewThreadsMustHaveMedium": true,
-			"BackupInterval": 900000000000,
-			"CaptchaExpiration": 900000000000
-		},
-		{
-			"Name": "int",
-			"Pages": 2,
-			"ThreadsPerPage": 10,
-			"BoardTmpl": "board.tmpl",
-			"ThreadTmpl": "thread.tmpl",
-			"MaxMediaPerPost": 4,
-			"MaxPostLength": 200,
-			"MaxThumbWidth": 200,
-			"MaxThumbHeight": 200,
-			"MaxFileSize": 10485760,
-			"NewThreadsMustHaveMedium": true,
-			"BackupInterval": 900000000000,
-			"CaptchaExpiration": 900000000000
-		}
-	]
+    "LocalAddress": ":8080",
+    "ServeStatic": true,
+    "Title": "bilderbrett",
+    "Boards": [
+        {
+            "Name": "b",
+            "Title": "random",
+            "Pages": 10,
+            "ThreadsPerPage": 10,
+            "BoardTmpl": "board.tmpl",
+            "ThreadTmpl": "thread.tmpl",
+            "MaxMediaPerPost": 4,
+            "MaxPostLength": 200,
+            "MaxThumbWidth": 200,
+            "MaxThumbHeight": 200,
+            "MaxFileSize": 10485760,
+            "NewThreadsMustHaveMedium": true,
+            "BackupInterval": 900000000000,
+            "CaptchaExpiration": 900000000000
+        },
+        {
+            "Name": "int",
+            "Title": "international",
+            "Pages": 2,
+            "ThreadsPerPage": 10,
+            "BoardTmpl": "board.tmpl",
+            "ThreadTmpl": "thread.tmpl",
+            "MaxMediaPerPost": 4,
+            "MaxPostLength": 200,
+            "MaxThumbWidth": 200,
+            "MaxThumbHeight": 200,
+            "MaxFileSize": 10485760,
+            "NewThreadsMustHaveMedium": true,
+            "BackupInterval": 900000000000,
+            "CaptchaExpiration": 900000000000
+        }
+    ]
 }

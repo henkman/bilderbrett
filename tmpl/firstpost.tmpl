@@ -1,0 +1,44 @@
+{{define "firstpost"}}
+<div class="post" id="post{{.Id}}">
+	<div class="header clearfix">
+		<div class="postid">
+			{{.Id}}
+		</div>
+		<div class="timestamp">
+			{{.Posted}}
+		</div>
+		<div class="reply">
+			<a href="thread/{{.Id}}">Reply</a>
+		</div>
+	</div>
+	<div class="postcontent">
+		<div class="message">
+		{{if .Media}}
+			<div class="attachments clearfix">
+			{{range .Media}}
+				{{if (or .IsImage .IsGif)}}
+				<div class="image" id="media_{{.Id}}">
+					<a href="/media/{{.Copy}}" title="{{.Original}}">
+						{{.ShortOriginal 20}}<br />
+						<img src="/thumb/{{.Thumb}}" />
+					</a>
+				</div>
+				{{else if .IsWebm}}
+				<div class="webm" id="media_{{.Id}}">
+					<video width="280" height="200" preload="metadata" controls>
+						<source src="/media/{{.Copy}}" type="video/webm">
+					</video>
+					<a href="/media/{{.Copy}}" title="{{.Original}}">
+						{{.ShortOriginal 20}}
+					</a>
+				</div>
+				{{end}}
+			{{end}}
+			</div>
+		{{end}}
+		{{.Text}}
+		</div>
+	</div>
+</div>
+<br/>
+{{end}}

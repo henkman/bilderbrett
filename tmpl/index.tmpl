@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>{{.Title}}</title>
+	<link rel="stylesheet" href="/res/style.css"></style>
+</head>
+<body>
+<h1>{{.Title}}</h1>
+{{range .Boards}}
+<a href="/{{.Name}}/">/{{.Name}}/ - {{.Title}}</a>
+{{end}}
+</body>
+</html>

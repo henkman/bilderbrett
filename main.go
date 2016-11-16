@@ -128,6 +128,7 @@ func (ts Threads) Less(i, j int) bool {
 
 type BoardConfiguration struct {
 	Name                     string
+	Title                    string
 	Pages                    uint
 	ThreadsPerPage           uint
 	BoardTmpl                string
@@ -205,8 +206,16 @@ func (b *Board) GetThreadById(id uint64) *Thread {
 	return nil
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-
+func makeIndexHandler(title string) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		tmpls.ExecuteTemplate(w, "index.tmpl", struct {
+			Boards []Board
+			Title  string
+		}{
+			boards,
+			title,
+		})
+	}
 }
 
 func makeThreadHandler(board *Board) httprouter.Handle {
@@ -243,6 +252,8 @@ func makeThreadHandler(board *Board) httprouter.Handle {
 		}
 		tmpls.ExecuteTemplate(w, board.ThreadTmpl, struct {
 			Name         string
+			Title        string
+			Boards       []Board
 			Thread       Thread
 			Pages        []uint
 			MaxMedia     []uint
@@ -250,6 +261,8 @@ func makeThreadHandler(board *Board) httprouter.Handle {
 			NeedsCaptcha bool
 		}{
 			board.Name,
+			board.Title,
+			boards,
 			*thread,
 			pages,
 			maxmedia,
@@ -285,6 +298,8 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 		}
 		tmpls.ExecuteTemplate(w, board.BoardTmpl, struct {
 			Name         string
+			Title        string
+			Boards       []Board
 			Threads      []Thread
 			Pages        []uint
 			MaxMedia     []uint
@@ -292,6 +307,8 @@ func makeBoardHandler(board *Board, page uint) httprouter.Handle {
 			NeedsCaptcha bool
 		}{
 			board.Name,
+			board.Title,
+			boards,
 			threads,
 			pages,
 			maxmedia,
@@ -617,6 +634,7 @@ func main() {
 	// TODO also/only write log to file
 	logger = log.New(os.Stderr, "", log.LUTC)
 
+	var title string
 	var localAddress string
 	var serveStatic bool
 	var boardconfigs []BoardConfiguration
@@ -630,6 +648,7 @@ func main() {
 		}
 		jd := json.NewDecoder(fd)
 		var config struct {
+			Title        string
 			LocalAddress string
 			ServeStatic  bool
 			Boards       []BoardConfiguration
@@ -644,6 +663,7 @@ func main() {
 			logger.Fatal("no boards configured in config.json")
 			return
 		}
+		title = config.Title
 		localAddress = config.LocalAddress
 		serveStatic = config.ServeStatic
 		boardconfigs = config.Boards
@@ -666,7 +686,7 @@ func main() {
 		}
 		tmpls = t
 	}
-	boards := make([]Board, len(boardconfigs))
+	boards = make([]Board, len(boardconfigs))
 	for i, _ := range boards {
 		b := &boards[i]
 		b.BoardConfiguration = boardconfigs[i]
@@ -690,7 +710,7 @@ func main() {
 		}
 	}
 	router := httprouter.New()
-	router.GET("/", indexHandler)
+	router.GET("/", makeIndexHandler(title))
 	for i, _ := range boards {
 		board := &boards[i]
 		router.GET("/"+board.Name+"/", makeBoardHandler(board, 0))

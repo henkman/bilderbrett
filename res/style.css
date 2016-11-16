@@ -1,8 +1,8 @@
 
 .clearfix:after {
-  content: "";
-  display: table;
-  clear: both;
+	content: "";
+	display: block;
+	clear: both;
 }
 
 /* Reply form */
@@ -34,7 +34,13 @@
 }
 
 .post .timestamp {
-	margin-left: 20px;
+	padding-left:10px;
+	float: left;
+}
+
+.post .reply {
+	padding-left:10px;
+	float: left;
 }
 
 /* Post content */

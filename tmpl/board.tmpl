@@ -1,12 +1,38 @@
 <!DOCTYPE html>
 <html>
 <head>
-	<title></title>
+	<title>{{.Title}}</title>
 	<link rel="stylesheet" href="/res/style.css"></style>
 	<script src="/res/script.js"></script>
 </head>
 <body>
 	{{$board := .Name}}
+	
+	{{range .Boards}}
+	<a href="/{{.Name}}/">/{{.Name}}/</a>
+	{{end}}
+	<hr/>
+	
+	<div>
+		{{range .Pages}}
+		<a href="/{{$board}}/{{.}}">{{.}}</a>
+		{{end}}
+	</div>
+	
+	{{range .Threads}}
+	<div class="thread" id="thread_{{.Post.Id}}">
+		{{template "firstpost" .Post}}
+	</div>
+	{{end}}
+	
+	<div>			
+		{{range .Pages}}
+		<a href="/{{$board}}/{{.}}">{{.}}</a>
+		{{end}}
+	</div>
+	
+	<hr/>
+	
 	<div class="postform">
 		<form method="post" action="/{{$board}}/" enctype="multipart/form-data">
 			<div class="fileupload">
@@ -20,19 +46,6 @@
 			{{end}}
 			<input type="submit" value="Post" />
 		</form>
-	</div>
-	{{range .Threads}}
-	<div class="thread" id="thread_{{.Post.Id}}">
-		<div class="reply">
-			<a href="/{{$board}}/thread/{{.Post.Id}}">Reply</a>
-		</div>
-		{{template "post" .Post}}
-	</div>
-	{{end}}
-	<div>			
-		{{range .Pages}}
-		<a href="/{{$board}}/{{.}}">{{.}}</a>
-		{{end}}
 	</div>
 </body>
 </html>
